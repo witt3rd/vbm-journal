@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# no-crash-record begin|end: the landing's crash-record check as two plain commands for a Tier 1 script (lib/no-crash-record.sh says whose crashes count). `begin` stamps the start and the landing's identity (the CALLING process is its root: its pid and
+# start time, session, cgroup, private TMPDIR, repository) in $TMPDIR/no-crash-record.state; `end` FAILS when a crash record belongs to this landing's own tree (a missing or unreadable state fails too). Run it from the repository root, and from a wrapper only with `exec` (the root is the process that called it: a wrapper that returns first would leave a dead root).
+set -euo pipefail
+. "$(dirname "$0")/../lib/no-crash-record.sh"
+f="${TMPDIR:?no-crash-record: TMPDIR unset}/no-crash-record.state"
+case "${1:-}" in
+  begin) NOCRASH_ROOT_PID=${NOCRASH_ROOT_PID:-$PPID}; nocrash_begin; nocrash_save "$f";;
+  end) if [ -r "$f" ]; then nocrash_load "$f"; else nocrash_t0=; fi; nocrash_end;;
+  *) echo "usage: no-crash-record begin|end" >&2; exit 2;;
+esac

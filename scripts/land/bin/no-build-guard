@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# no-build-guard [-- CMD...]     refuse (exit 2, nothing started) on a host that carries a no-build marker (/etc/vbm/no-build-host or <config dir>/vbm/no-build-host); with CMD, then exec CMD.
+# no-build-guard --lint [ROOT]   Tier 1 lint (also --selftest, which runs the fixtures only): the repository's scripts/run-scoped.sh calls this guard before it starts anything and really refuses with a marker present;
+#                                a runner declared in scripts/long-runners.txt or scripts/heavy-runners.txt (`NAME`: callers wrap it, `self NAME`: its file calls this guard) is never run outside run-scoped.sh / this guard / run-probe.
+# There is NO override: VBM_ALLOW_BUILD_HERE and every other variable are ignored. Honest limits, in docs/no-build-host.md (a deleted marker; a marker created after the check; indirection the lint cannot see).
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/no-build-host.sh"
+guard_ok() { local n; n=$(grep -vE '^[[:space:]]*#' "$1" 2>/dev/null | grep -cE '(^|[^A-Za-z0-9_-])no-build-guard([[:space:]"'"'"')]|$)'); [ "${n:-0}" -gt 0 ]; }   # a call, not a comment
+pre='(^|[;&|(]|\$\(|--|[[:space:]](python3?|bash|sh|exec|time|nice|env))[[:space:]]*(python3?[[:space:]]+|bash[[:space:]]+|sh[[:space:]]+)?(\./)?(scripts/)?'
+okpre='(run-scoped\.sh|no-build-guard|run-probe)'
+runs_bare() { local n=${1//./\\.}; grep -vE '^[[:space:]]*#' | grep -E "${pre}${n}([[:space:];&|)]|\$)" | grep -vE "${okpre}.*${n}"; }   # stdin lines that run NAME outside a helper
+lint() {
+  local root=${1:-.} bad= selfs= names= e f n rs=scripts/run-scoped.sh t sent
+  cd "$root" || return 2
+  for l in scripts/long-runners.txt scripts/heavy-runners.txt; do [ -f "$l" ] || continue
+    while read -r a b; do case $a in ''|'#'*) ;; self) selfs="$selfs $b";; *) names="$names $a";; esac; done < "$l"; done
+  if [ -n "$names$selfs" ] && [ ! -f "$rs" ]; then bad="$bad$rs: runners are declared but there is no scoped-run helper"$'\n'; fi
+  if [ -f "$rs" ]; then
+    guard_ok "$rs" || bad="$bad$rs: does not call no-build-guard"$'\n'
+    g=$(grep -nE '(^|[^A-Za-z0-9_-])no-build-guard([[:space:]]|\)|$)' "$rs" | grep -vE '^[0-9]+:[[:space:]]*#' | sed -n 1p | cut -d: -f1); s=$(grep -nE '^[^#]*(systemd-run|setsid|exec[[:space:]]+"?\$)' "$rs" | sed -n 1p | cut -d: -f1)
+    [ -z "$g" ] || [ -z "$s" ] || [ "$g" -lt "$s" ] || bad="$bad$rs: the guard (line $g) comes after the first thing it must precede (line $s)"$'\n'
+    sent=$(mktemp -d "${TMPDIR:-/tmp}/nbg-lint.XXXXXX"); mkdir -p "$sent/c/vbm"; : > "$sent/c/vbm/no-build-host"
+    XDG_CONFIG_HOME=$sent/c "$rs" lintprobe 5 touch "$sent/ran" >/dev/null 2>&1; r=$?
+    { [ "$r" = 2 ] && [ ! -e "$sent/ran" ]; } || bad="$bad$rs: with a marker present it was not refused (exit $r, started: $([ -e "$sent/ran" ] && echo yes || echo no))"$'\n'; rm -rf "$sent"
+  fi
+  for e in $selfs; do f=$(git ls-files | grep -E "(^|/)$e\$" | sed -n 1p || true)
+    if [ -z "$f" ]; then bad="$bad$e: a self runner that is not in the tree"$'\n'; elif ! guard_ok "$f"; then bad="$bad$f: a self runner with no no-build-guard call"$'\n'; fi; done
+  for n in $names; do
+    while IFS= read -r f; do [ -f "$f" ] || continue; case $f in scripts/land/*|scripts/run-scoped.sh|scripts/lint-scoped-runners.sh|scripts/check-scoped-runners.sh) continue;; esac
+      h=$(runs_bare "$n" < "$f" || true); [ -z "$h" ] || bad="$bad$f: runs $n outside run-scoped.sh: $(echo "$h" | sed -n 1p | cut -c1-100)"$'\n'
+    done < <(git ls-files 'scripts/*.sh' scripts/wt scripts/land-direct 'scripts/githooks/*' '.github/workflows/*')
+  done
+  [ -z "$bad" ] || { echo "no-build-guard --lint: a long runner can start on a no-build host:" >&2; printf '%s' "$bad" >&2; return 1; }
+  echo "no-build-guard --lint: ok"
+}
+selftest() {
+  local t line; t=$(mktemp); trap 'rm -f "$t"' RETURN
+  for line in 'python3 scripts/mutants.py --jobs 4' 'mise exec -- scripts/mutants.py' 'x=$(python3 scripts/mutants.py)' 'true; bash scripts/mutants.py' 'run | scripts/mutants.py'; do
+    [ -n "$(printf '%s\n' "$line" | runs_bare mutants.py || true)" ] || { echo "no-build-guard --selftest: did not flag: $line" >&2; return 1; }; done
+  for line in 'scripts/run-scoped.sh mutants 3600 python3 scripts/mutants.py' 'scripts/land/bin/no-build-guard -- python3 scripts/mutants.py' '# python3 scripts/mutants.py' 'echo "see mutants.py"' 'cat scripts/mutants.py'; do
+    [ -z "$(printf '%s\n' "$line" | runs_bare mutants.py || true)" ] || { echo "no-build-guard --selftest: flagged a good line: $line" >&2; return 1; }; done
+  printf '%s\n' '# scripts/land/bin/no-build-guard' > "$t"; ! guard_ok "$t" || { echo "no-build-guard --selftest: a commented call passed" >&2; return 1; }
+  printf '%s\n' '"$d/land/bin/no-build-guard" || exit 2' > "$t"; guard_ok "$t" || { echo "no-build-guard --selftest: a call was refused" >&2; return 1; }
+  echo "no-build-guard --selftest: ok"
+}
+case ${1:-} in
+  --lint) lint "${2:-.}"; exit $?;;
+  --selftest) selftest; exit $?;;
+  --help|-h) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+  --) shift; [ $# -gt 0 ] || { echo "usage: no-build-guard [-- CMD...] | --lint [ROOT] | --selftest" >&2; exit 2; };;
+  -*) echo "usage: no-build-guard [-- CMD...] | --lint [ROOT] | --selftest" >&2; exit 2;;
+esac
+nbh_guard no-build-guard || exit 2
+[ $# -eq 0 ] || exec "$@"

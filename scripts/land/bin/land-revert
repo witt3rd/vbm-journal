@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# land-revert: the watchdog for a red base branch. Landing never stops for a red main; this reverts the commit that made it red.
+#
+#   land-revert [--dry-run] [--conf PATH] --bad SHA --good SHA     SHA = the commit whose Tier 1 job failed on CI (--bad), the last commit known green (--good)
+#
+# Runs the repository's own Tier 1 (the gates command, then the test command of scripts/land.conf, as read from <remote>/<base>) in a scratch worktree: first on --bad (a failure that does
+# not reproduce is nobody's fault: nothing is reverted), then BISECTING the commits --good..--bad for the first one that fails. That commit is reverted (git revert; its required trailers are
+# copied, so the author is known by the Task-ID trailer) and the revert lands through bin/land-direct like any change: on its own build and gates, a true revert is a fix, so it passes a red or frozen
+# base, and a `Diff-Budget:` trailer exempts it from the size budget. If the revert conflicts with later commits, the later commits that touch the same files are reverted too, newest first,
+# at most 5; past that, or when the landing is refused, it ALERTS (exit 3) and changes nothing. It never pushes by itself and never freezes anything.
+# The `on-revert` hook (LAND_HOOKS_DIR of <remote>/<base>) is told the outcome, to notify the author: LAND_REVERT_RESULT (reverted | alert | green | already-reverted), LAND_REVERT_CULPRIT, LAND_REVERT_SHAS,
+# LAND_REVERT_TASK (the culprit's first required trailer value), LAND_REVERT_AUTHOR (its e-mail), LAND_REVERT_SUBJECT.
+# Exit codes: 0 reverted, or nothing to revert (green on re-run, or already reverted), or --dry-run | 2 bad input or bad config | 3 ALERT: a person must look (message says why).
+# The LAST line of stdout is JSON: {"result","culprit","reverted","exit"}.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/conf.sh"
+dry=0; confpath=scripts/land.conf; bad=; good=; result=error; culprit=; nrev=0; run=; top=; remote=origin
+while [ $# -gt 0 ]; do case $1 in
+  --dry-run) dry=1;; --conf) confpath=${2:?--conf needs a path}; shift;; --bad) bad=${2:?--bad needs a sha}; shift;; --good) good=${2:?--good needs a sha}; shift;;
+  *) echo "usage: land-revert [--dry-run] [--conf PATH] --bad SHA --good SHA" >&2; exit 2;; esac; shift; done
+finish() { local c=$?
+  if [ -n "$run" ]; then
+    case $result in reverted|alert) [ ! -x "$run/on-revert" ] || (cd "$run" && LAND_REVERT_RESULT=$result LAND_REVERT_CULPRIT=$culprit LAND_REVERT_SHAS="${shas:-}" LAND_REVERT_TASK="${task:-}" LAND_REVERT_AUTHOR="${author:-}" LAND_REVERT_SUBJECT="${subj:-}" timeout --kill-after=10 "${LAND_STEP_TIMEOUT:-600}" ./on-revert) >&2 || true;; esac
+    for w in bis rev; do [ ! -e "$run/$w/.git" ] || git -C "$top" worktree remove -f "$run/$w" >/dev/null 2>&1 || true; done; rm -rf "$run"
+  fi
+  printf '{"result":"%s","culprit":%s,"reverted":%s,"exit":%s}\n' "$result" "$([ -n "$culprit" ] && echo "\"$culprit\"" || echo null)" "$nrev" "$c"; }
+trap finish EXIT
+stop() { local c=$1; result=$2; shift 2; echo "land-revert: $*" >&2; exit "$c"; }
+[ -n "$bad" ] && [ -n "$good" ] || stop 2 error "--bad and --good are required"
+top=$(git rev-parse --show-toplevel 2>/dev/null) || stop 2 error "not inside a git worktree"
+common=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir); mkdir -p "$common/vbm-land"; run=$(mktemp -d "$common/vbm-land/run.$$.XXXXXX")
+base=$(git -C "$top" symbolic-ref -q --short "refs/remotes/$remote/HEAD" 2>/dev/null | sed "s|^$remote/||" || true); base=${base:-main}
+conf_defaults; export LC_ALL=C
+git -C "$top" fetch -q "$remote" "$base" || stop 2 error "cannot fetch $remote $base"
+if git -C "$top" cat-file -e "$remote/$base:$confpath" 2>/dev/null; then conf_parse "$remote/$base:$confpath" < <(git -C "$top" show "$remote/$base:$confpath") || exit 2
+elif [ -r "$top/$confpath" ]; then conf_parse "$confpath" < "$top/$confpath" || exit 2; else stop 2 error "no configuration: $remote/$base has no $confpath"; fi
+conf_validate || exit 2
+[ "$LAND_REMOTE/$LAND_BASE" = "$remote/$base" ] || stop 2 error "the configuration names $LAND_REMOTE/$LAND_BASE: not supported here"
+bad=$(git -C "$top" rev-parse --verify -q "$bad^{commit}") && good=$(git -C "$top" rev-parse --verify -q "$good^{commit}") || stop 2 error "no such commit"
+git -C "$top" merge-base --is-ancestor "$good" "$bad" && git -C "$top" merge-base --is-ancestor "$bad" "$remote/$base" || stop 2 error "--good must be an ancestor of --bad, and --bad must be in $remote/$base"
+mapfile -t span < <(git -C "$top" rev-list --reverse --topo-order "$good..$bad"); [ ${#span[@]} -gt 0 ] || stop 2 error "--good and --bad are the same commit"
+export LAND_TOP=$top LAND_BASE_REF=$remote/$base LAND_RUN_DIR=$run LAND_ATTEMPT=1 LAND_PREV_BASE=
+tier1() { local rc=0; : > "$run/t1.log"   # the repository's Tier 1 at HEAD of $1
+  [ -z "$LAND_GATES_CMD" ] || (cd "$1" && timeout --kill-after=30 "$LAND_TIER1_TIMEOUT" bash -c "$LAND_GATES_CMD") >>"$run/t1.log" 2>&1 || rc=$?
+  [ "$rc" != 0 ] || [ -z "$LAND_TEST_CMD" ] || (cd "$1" && timeout --kill-after=30 "$LAND_TIER1_TIMEOUT" bash -c "$LAND_TEST_CMD") >>"$run/t1.log" 2>&1 || rc=$?
+  return "$rc"; }
+if git -C "$top" cat-file -e "$remote/$base:$LAND_HOOKS_DIR/on-revert" 2>/dev/null; then git -C "$top" show "$remote/$base:$LAND_HOOKS_DIR/on-revert" > "$run/on-revert"; chmod +x "$run/on-revert"; fi
+git -C "$top" worktree add -q -f --detach "$run/bis" "$bad"
+if git -C "$top" cat-file -e "$remote/$base:$LAND_HOOKS_DIR/prepare" 2>/dev/null; then git -C "$top" show "$remote/$base:$LAND_HOOKS_DIR/prepare" > "$run/prepare"; chmod +x "$run/prepare"; (cd "$run/bis" && "$run/prepare") >&2 || true; fi
+if tier1 "$run/bis"; then stop 0 green "Tier 1 is green on ${bad:0:12} here: the failure does not reproduce; nothing reverted"; fi
+lo=0; hi=$(( ${#span[@]} - 1 ))   # span[hi] fails; the first failing commit is the culprit (the commits before --good's successors are assumed green)
+while [ "$lo" -lt "$hi" ]; do mid=$(( (lo + hi) / 2 )); git -C "$run/bis" checkout -q --detach "${span[mid]}"; if tier1 "$run/bis"; then lo=$((mid + 1)); else hi=$mid; fi; done
+culprit=${span[lo]}; subj=$(git -C "$top" log -1 --format=%s "$culprit"); author=$(git -C "$top" log -1 --format=%ae "$culprit"); body=$(git -C "$top" log -1 --format=%B "$culprit")
+first=${LAND_REQUIRE_TRAILERS%% *}; task=; [ -z "$first" ] || task=$(sed -n "s/^$first: *//p" <<<"$body" | sed -n 1p)
+echo "land-revert: the first failing commit of ${#span[@]} is ${culprit:0:12}: $subj (task ${task:-none}, $author)"
+msgs=$(git -C "$top" log --format=%B "$good..$remote/$base"); ! grep -q "^This reverts commit $culprit" <<<"$msgs" || stop 0 already-reverted "${culprit:0:12} is already reverted"
+[ "$dry" = 0 ] || stop 0 dry-run "dry run: would revert ${culprit:0:12}"
+git -C "$top" worktree add -q -f --detach "$run/rev" "$remote/$base"; g() { git -C "$run/rev" "$@"; }
+mapfile -t files < <(git -C "$top" show --name-only --format= "$culprit")
+rcommit() {   # revert $1 as a commit of its own: a true revert (names the commit), the culprit's required trailers, exempt from the size budget
+  local c=$1 t tr=(); g revert --no-commit "$c" >/dev/null 2>&1 || { g revert --abort >/dev/null 2>&1 || g reset -q --hard; return 1; }
+  for t in $LAND_REQUIRE_TRAILERS; do tr+=(-m "$t: $(git -C "$top" log -1 --format=%B "$c" | sed -n "s/^$t: *//p" | sed -n 1p)"); done
+  g commit -qm "Revert \"$(git -C "$top" log -1 --format=%s "$c")\"" -m "This reverts commit $c." -m "Diff-Budget: automatic revert by land-revert" "${tr[@]}"; }
+if rcommit "$culprit"; then shas=$culprit; nrev=1
+else
+  g reset -q --hard; mapfile -t later < <(git -C "$top" rev-list --topo-order "$culprit..$remote/$base" -- "${files[@]}")   # newest first
+  [ ${#later[@]} -le 5 ] || stop 3 alert "${culprit:0:12} conflicts with ${#later[@]} later commits touching the same files (more than 5): not reverting; a person must look"
+  shas=$culprit; for c in "${later[@]}" "$culprit"; do rcommit "$c" || stop 3 alert "reverting ${c:0:12} conflicts: nothing reverted; a person must look"; done; nrev=$(( ${#later[@]} + 1 )); shas="${later[*]} $culprit"
+fi
+rc=0; (cd "$run/rev" && "$here/land-direct") >"$run/land.out" 2>&1 || rc=$?; tail -n 8 "$run/land.out" >&2
+[ "$rc" = 0 ] || stop 3 alert "the revert of ${culprit:0:12} was not landed (land-direct exit $rc): a person must look"
+stop 0 reverted "reverted ${culprit:0:12} ($nrev commit(s)) and landed it"

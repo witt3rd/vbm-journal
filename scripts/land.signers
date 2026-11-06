@@ -1,0 +1,3 @@
+# vbm-land release signers (an ssh allowed-signers file). A consumer copies this file to its own scripts/land.signers, out of band, on its first install: install --signers FILE.
+# Rotation: a new key is a NEW LINE here (the old line stays, so old tags still verify); consumers review the change to their own scripts/land.signers. docs/signing.md.
+vbm-land-release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMA8QfBUeDmLAEchZzDu3IKVR4LMvjLymi559Oe3R2MY

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The entry point: land with scripts/land-direct. install creates this file once (from scripts/land/templates/land-direct-stub); it is YOURS afterwards.
+# Add what your repository needs before the exec (an environment variable, a document of what your hooks rely on); keep the exec of the pinned lander:
+# scripts/land/bin/land-check fails when this file is missing, not executable, or no longer runs scripts/land/bin/land-direct. Everything under scripts/land/ is read-only.
+exec "$(cd "$(dirname "$0")" && pwd)/land/bin/land-direct" "$@"

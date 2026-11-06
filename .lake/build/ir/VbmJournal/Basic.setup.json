@@ -1,0 +1,7 @@
+{"plugins": [],
+ "package": "vbm-journal",
+ "options": {"warningAsError": true, "autoImplicit": false},
+ "name": "VbmJournal.Basic",
+ "isModule": false,
+ "importArts": {},
+ "dynlibs": []}

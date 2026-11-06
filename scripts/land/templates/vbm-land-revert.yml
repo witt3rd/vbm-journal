@@ -1,0 +1,34 @@
+# The watchdog: when the Tier 1 job of a push to the base branch failed, revert the commit that made it red (scripts/land/bin/land-revert), through the repository's own lander.
+# A separate workflow from the gate so it can never make the base branch red. It runs after the gate's workflow completes with a failure.
+# It needs a runner that has the toolchain of your Tier 1 (land-revert runs it to find the first failing commit, then once more on the revert) and a push token THIS repository holds
+# (secret VBM_LAND_PUSH_TOKEN; a push by the default workflow token does not start the push CI that defines "red"). Notify the author in your `on-revert` hook (scripts/land.d/on-revert:
+# LAND_REVERT_RESULT, LAND_REVERT_TASK, LAND_REVERT_AUTHOR, LAND_REVERT_SUBJECT in its environment).
+name: vbm-land-revert
+on:
+  workflow_run:
+    workflows: [ci]            # the name of the gate's workflow
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: vbm-land-revert       # one watchdog at a time
+  cancel-in-progress: false
+jobs:
+  revert:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.VBM_LAND_PUSH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.VBM_LAND_PUSH_TOKEN }}
+          fetch-depth: 0
+      - name: Revert the first failing commit
+        run: |
+          git config user.name "vbm-land-revert"; git config user.email "vbm-land-revert@users.noreply.github.com"
+          good=$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json headSha --jq '.[0].headSha')
+          [ -n "$good" ] || { echo "no green run to bisect from: a person must look"; exit 1; }
+          scripts/land/bin/land-revert --bad "${{ github.event.workflow_run.head_sha }}" --good "$good"

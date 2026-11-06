@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# run-probe [--core-limit N] CMD...   run a probe or mutant that is MEANT to crash so that it leaves no crash record and no core, in a PRIVATE TMPDIR (mktemp -d, exported to CMD, removed after): never a fixed /tmp name.
+# run-probe --require                 inside a probe: exit 0 only when this process really runs under run-probe (core limit 0 and the dumpable-clear preload); else REFUSED (exit 2).
+# run-probe --lint LIST [ROOT]        exit 1 when a tracked file runs a probe binary named in LIST (one name per line, # comments) on a line that does not go through run-probe (or quiet); `# probe-ok` on the line exempts it.
+# The rule: ulimit -c 0 PLUS the dumpable-clear preload (PR_SET_DUMPABLE 0); ulimit alone still writes a crash-journal record (measured on a systemd-coredump host: exit 139, no core file, yet a coredumpctl entry and a desktop notice).
+# Refused (exit 2, nothing run): a call that raises the core limit (--core-limit N with N not 0, or RUN_PROBE_CORE_LIMIT set to anything but 0), a limit that cannot be lowered to 0, no C compiler for the preload.
+# The matching check (lib/no-crash-record.sh, docs/crash-probes.md): 
+# Residual hole (accepted, stated plainly): an orphan that also setsid's, runs from a shared dir and leaves our scope is NOT caught (the matching rule: lib/no-crash-record.sh, docs/crash-probes.md).
+# Honest limit: a statically linked binary ignores the preload (its crash still leaves a record; the core is still not written).
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/no-crash-record.sh"
+refuse() { echo "run-probe: REFUSED: $*" >&2; exit 2; }
+want=${RUN_PROBE_CORE_LIMIT:-0}
+case ${1:-} in
+  --require) [ "${RUN_PROBE_ACTIVE:-}" = 1 ] && [ "$(ulimit -Sc)" = 0 ] && [ "$(ulimit -Hc)" = 0 ] && [[ ":${LD_PRELOAD:-}:" == *"/quiet.so:"* ]] || refuse "this process was not launched by run-probe with ulimit -c 0 and the dumpable-clear preload"; exit 0;;
+  --lint) list=${2:?usage: run-probe --lint LIST [ROOT]}; root=${3:-.}; bad=0; cd "$root" || exit 2
+    while IFS= read -r n; do n=${n%%#*}; n=${n// /}; [ -n "$n" ] || continue
+      while IFS=: read -r f ln line; do [ "$f" = "$list" ] && continue
+        case $line in *run-probe*|*quiet\ *|*probe-ok*) ;; *) echo "run-probe --lint: $f:$ln runs probe '$n' outside run-probe: ${line:0:120}" >&2; bad=1;; esac
+      done < <(git ls-files -z 2>/dev/null | xargs -0 -r grep -InwF -- "$n" 2>/dev/null | grep -v '^scripts/land/' | sed 's/^\([^:]*\):\([0-9]*\):/\1:\2:/')
+    done < "$list"; exit $bad;;
+  --core-limit) want=${2:?--core-limit needs a value}; shift 2;;
+esac
+"$here/no-build-guard" || exit 2   # a host with a no-build marker runs nothing (docs/no-build-host.md); before the compiler, before the TMPDIR
+[ $# -gt 0 ] || { echo "usage: run-probe [--core-limit 0] CMD... | --require | --lint LIST [ROOT]" >&2; exit 2; }
+[ "$want" = 0 ] || refuse "a probe must run with ulimit -c 0; asked for a core limit of $want"
+nocrash_build || refuse "no preload (needs a C compiler)"
+d=$(mktemp -d "${TMPDIR:-/tmp}/run-probe.XXXXXX") || exit 2; trap 'rm -rf "$d"' EXIT
+( ulimit -c 0 && [ "$(ulimit -Sc)" = 0 ] && [ "$(ulimit -Hc)" = 0 ] ) || refuse "the core limit could not be lowered to 0"
+( ulimit -c 0; export RUN_PROBE_ACTIVE=1 TMPDIR=$d LD_PRELOAD="$nocrash_so${LD_PRELOAD:+:$LD_PRELOAD}"; exec "$@" )

@@ -1,0 +1,31 @@
+# Tier 1 on a push to the base branch only (the lander already ran it locally on the exact combination: this is the independent check that defines
+# "main is red"); Tier 2 on a schedule. Hosted minutes are budgeted: no pull_request trigger. The watchdog (templates/vbm-land-revert.yml) runs after this workflow fails on a push.
+name: ci
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  tier1:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/land/bin/land-check          # the vendored copy is still its pin
+      - run: echo "replace with this repository's Tier 1 command"
+  tier2:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/land/bin/land-check --upstream   # the pin is what the source says it is; prints when a newer release exists
+      - run: echo "replace with the slow checks (full integration, fuzzing, ...)"

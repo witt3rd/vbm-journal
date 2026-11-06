@@ -1,0 +1,36 @@
+# Tier 1 on a push to main, on x86_64 and aarch64 hosted runners. Hosted runners only, read-only token, no secret. The Lean toolchain is the release tarball of LEAN_VERSION, checked against its published sha256 before it is unpacked.
+name: ci
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  tier1:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: linux
+            sha: 7289597a44543246c9227b8cae501767e095ce17f6d448b95fc4a8dc97268f6d
+          - os: ubuntu-24.04-arm
+            asset: linux_aarch64
+            sha: c8f0f8a3920e839718b1343e6781fd80a3e9b1024fbcd7078eb30f54e806b028
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      LEAN_VERSION: 4.35.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install the pinned Lean toolchain
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/lean.tar.zst" "https://github.com/leanprover/lean4/releases/download/v${LEAN_VERSION}/lean-${LEAN_VERSION}-${{ matrix.asset }}.tar.zst"
+          echo "${{ matrix.sha }}  $RUNNER_TEMP/lean.tar.zst" | sha256sum -c -
+          mkdir -p "$HOME/lean" && tar --zstd -xf "$RUNNER_TEMP/lean.tar.zst" -C "$HOME/lean" --strip-components=1
+          echo "$HOME/lean/bin" >> "$GITHUB_PATH"
+      - name: Tier 1
+        run: tests/tier1.sh

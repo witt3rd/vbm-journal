@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# land-update --check [--root DIR]
+# land-update <tag|commit> [--root DIR]
+# land-update --pkg NAME [--source SRC] [--signers FILE] <tag> ...   every mode below, for ANOTHER signed package vendored into scripts/NAME/ the same way (lib/pkg.sh; docs/packages.md). The first install
+#   names the source and the trusted signers file (--source, --signers; both are recorded: the PIN and scripts/NAME.signers); after that the PIN's source is the only source. A package release MUST be a signed tag
+#   (a package without scripts/NAME.signers is refused, never "UNVERIFIED"); nothing of it runs; the files are checked against the manifest before anything is written.
+#
+# --check: READ-ONLY. Compares the pin (scripts/land/PIN) with the release tags of the source and prints one line:
+#     vbm-land: pinned v0.1.0, latest v0.3.2: behind 4 releases (minor)        |      vbm-land: pinned v0.3.2 is the latest release: up to date
+#   The class is the semver distance of the pin to the latest release: patch, minor or major. Exit 0 up to date | 1 behind (visible, never a gate: run it in a workflow of its own) |
+#   2 not installed | 3 the source cannot be reached (not "up to date": nobody knows). Under GitHub Actions it also writes a warning annotation and a step-summary line when behind.
+# land-update --diff <tag> [--root DIR]: verify the release (below) and show what it would change (changed, added and removed vendored files, their diffs, and the CHANGELOG entries newer than the pin); changes nothing.
+# land-update --auto: the scheduled workflow's mode. Reads LAND_AUTO_UPDATE (none | patch | minor; default none) from the repository's land.conf on its base branch. none: reports like --check.
+#   patch / minor: when a release within that class is out, does `--land` to the newest such release; a MAJOR release is never automatic (it is reported). On a red or a refusal it stops and exits non-zero.
+# land-update --land <tag|commit>: the whole update as the repository's own act: verify, stage, commit `chore(land): vbm-land <version>` (with the trailers the repository's land.conf requires), then land it
+#   through the repository's OWN lander and gates (its Tier 1, its hooks, its attack suite), run from a pristine fresh clone of the base branch, so the lander that lands the new copy is the old one already on
+#   main. Needs a clean worktree. It stops on the first red or refusal and lands nothing (the commit stays local for you to look at); it never forces. Exit code: the lander's.
+# <tag|commit>: VERIFY the release first (a signed tag from an allowed signer, recording the manifest it points at: scripts/land.signers makes this mandatory; without it the update says UNVERIFIED), then replace the vendored copy of this tool with the release named, from the source recorded in the PIN. It stages the new tree and PIN in the working tree and verifies
+#   them; it commits nothing. Commit the result as ONE commit (`chore(land): vbm-land <version>`) and land it like any other change.
+set -euo pipefail
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/source.sh"; . "$here/../lib/pkg.sh"
+ref=; root=; check=0; diffonly=0; land=0; auto=0; pkg=land; srcarg=; signers_arg=
+usage() { echo "usage: land-update [--pkg NAME [--source SRC] [--signers FILE]] --check | --diff <tag> | [--land] <tag|commit>   [--root DIR]" >&2; exit 2; }
+while [ $# -gt 0 ]; do case $1 in --root) root=${2:?--root needs a directory}; shift;; --pkg) pkg=${2:?--pkg needs a name}; shift;; --source) srcarg=${2:?--source needs a value}; shift;; --signers) signers_arg=${2:?--signers needs a file}; shift;; --check) check=1;; --diff) diffonly=1;; --land) land=1;; --auto) auto=1;; -*) usage;; *) ref=$1;; esac; shift; done
+[ "$check" = 1 ] || [ "$auto" = 1 ] || [ -n "$ref" ] || usage
+[ "$pkg" != land ] || [ -z "$srcarg$signers_arg" ] || { echo "land-update: --source and --signers belong to --pkg NAME (this tool's own first install is \`install\`)" >&2; exit 2; }
+[ -n "$root" ] || root=$(git rev-parse --show-toplevel)
+label=vbm-land; pdir=scripts/land; upd=scripts/land/bin/land-update
+if [ "$pkg" != land ]; then pkg_name_ok "$pkg" || { echo "land-update: bad package name '$pkg' (lower case letters, digits, -; not land)" >&2; exit 2; }; label=$pkg; pdir=scripts/$pkg; upd="$upd --pkg $pkg"; fi
+vpath() { if [ "$pkg" = land ]; then case "$1" in skills/*) echo ".agents/$1";; *) echo "scripts/land/$1";; esac; else echo "$pdir/$1"; fi; }   # where a payload path lives in a consumer
+pin=$root/$pdir/PIN
+pinsrc=$(sed -n 's/^source=//p' "$pin" 2>/dev/null | sed -n 1p || true); src=$pinsrc
+if [ "$pkg" != land ] && [ -n "$srcarg" ] && [ "$check$auto" = 00 ]; then   # a package's first install names its source; afterwards the PIN's is the only one
+  [ -z "$pinsrc" ] || [ "$srcarg" = "$pinsrc" ] || { echo "land-update: the source is the PIN's ($pinsrc); --source is for a first install only" >&2; exit 2; }; src=$srcarg
+fi
+[ -n "$src" ] || { echo "land-update: no $pdir/PIN in $root: install first ($([ "$pkg" = land ] || echo "land-update --pkg $pkg --source SRC --signers FILE <tag>; or ")install --source SRC <ref>)" >&2; exit 2; }
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/land-update.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
+if [ "$auto" = 1 ]; then   # the policy is the repository's own, read from its base branch (a change cannot grant itself an auto-update)
+  . "$here/../lib/conf.sh"; conf_defaults
+  git -C "$root" fetch -q origin 2>/dev/null || true
+  b=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD | sed 's#^origin/##' || true); b=${b:-main}
+  if git -C "$root" cat-file -e "origin/$b:scripts/land.conf" 2>/dev/null; then conf_parse land.conf < <(git -C "$root" show "origin/$b:scripts/land.conf") || exit 2; fi
+  conf_validate >/dev/null 2>&1 || true
+  if [ "$LAND_AUTO_UPDATE" = none ]; then echo "land-update --auto: LAND_AUTO_UPDATE=none: reporting only"; fi
+fi
+if [ "$check" = 1 ] || [ "$auto" = 1 ]; then
+  pinned=$(sed -n 's/^version=//p' "$pin" | sed -n 1p); [[ "$pinned" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] || { echo "land-update: the PIN has no usable version= ($pinned)" >&2; exit 2; }
+  src_fetch "$src" HEAD "$tmp/src" >/dev/null 2>"$tmp/err" || { echo "$label: cannot reach the source $src to look for releases: $(cat "$tmp/err"): NOT verified up to date" >&2; exit 3; }
+  tags=$(git -C "$tmp/src" tag --list 'v[0-9]*.[0-9]*.[0-9]*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | LC_ALL=C sort -V)
+  [ -n "$tags" ] || { echo "$label: pinned $pinned; the source $src has no release tags yet: nothing to compare" ; exit 0; }
+  latest=$(tail -n1 <<<"$tags"); base=${pinned%%-*}   # a pre-release label (v0.3.0-dev) is older than its own release
+  behind=0; for t in $tags; do
+    [ "$t" != "$pinned" ] || continue
+    if [ "$t" = "$base" ] || [ "$(printf '%s\n%s\n' "$base" "$t" | LC_ALL=C sort -V | tail -n1)" = "$t" ]; then behind=$((behind + 1)); fi
+  done
+  [ "$behind" -gt 0 ] || { echo "$label: pinned $pinned is the latest release ($latest): up to date"; exit 0; }
+  IFS=. read -r pa pb pc <<<"${base#v}"; IFS=. read -r la lb lc <<<"${latest#v}"
+  if [ "$la" != "$pa" ]; then class=major; elif [ "$lb" != "$pb" ]; then class=minor; else class=patch; fi
+  line="$label: pinned $pinned, latest $latest: behind $behind release$([ "$behind" = 1 ] || echo s) ($class)"
+  echo "$line"
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::warning title=$label update available::$line. Run the update-vbm-land skill ($upd $latest)."; fi
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$line" >> "$GITHUB_STEP_SUMMARY"; fi
+  [ "$auto" = 1 ] && [ "$LAND_AUTO_UPDATE" != none ] || exit 1
+  # the newest release this repository allows itself to take: patch = same major.minor, minor = same major; a MAJOR release is never automatic
+  target=; for t in $tags; do
+    IFS=. read -r ta tb tc <<<"${t#v}"
+    [ "$t" != "$pinned" ] || continue
+    if [ "$t" != "$base" ] && [ "$(printf '%s\n%s\n' "$base" "$t" | LC_ALL=C sort -V | tail -n1)" != "$t" ]; then continue; fi
+    case $LAND_AUTO_UPDATE in patch) [ "$ta.$tb" = "$pa.$pb" ] && target=$t;; minor) [ "$ta" = "$pa" ] && target=$t;; esac
+  done
+  [ -n "$target" ] || { echo "land-update --auto: no release within LAND_AUTO_UPDATE=$LAND_AUTO_UPDATE (a major waits for a person): reporting only"; exit 1; }
+  echo "land-update --auto: updating to $target (LAND_AUTO_UPDATE=$LAND_AUTO_UPDATE), through this repository's own lander"
+  ref=$target; land=1; rm -rf "$tmp/src"
+fi
+c=$(src_fetch "$src" "$ref" "$tmp/src") || exit 1
+sf=scripts/land.signers; [ "$pkg" = land ] || sf=scripts/$pkg.signers   # a package has signers of its own: trusting one source's key says nothing about another's
+signers=; [ ! -r "$root/$sf" ] || signers=$root/$sf
+if [ "$pkg" != land ]; then
+  [ -z "$signers_arg" ] || [ -z "$signers" ] || cmp -s "$signers_arg" "$signers" || { echo "land-update: $sf exists and differs from --signers: a key change is a reviewed edit of that file" >&2; exit 2; }
+  [ -n "$signers" ] || signers=$signers_arg
+  [ -n "$signers" ] || { echo "REFUSED: package $pkg requires signed releases: no $sf (first install: --signers FILE, the maintainer's public key taken out of band)" >&2; exit 1; }
+fi
+vrc=0; src_verify "$tmp/src" "$ref" "$signers" || vrc=$?   # BEFORE anything of the new release runs: the installer below is the new release's own
+[ "$vrc" != 1 ] || exit 1
+if [ "$diffonly" = 1 ]; then
+  mkdir -p "$tmp/tree"; git -C "$tmp/src" archive "$c" | tar -x -C "$tmp/tree"
+  n=0; a=0; r=0; out=$tmp/diff.txt; : > "$out"
+  while read -r _ f; do [ -n "$f" ] || continue; v=$(vpath "$f")
+    if [ ! -e "$root/$v" ]; then a=$((a + 1)); echo "ADDED   $v" >> "$out"
+    elif ! cmp -s "$tmp/tree/$f" "$root/$v"; then n=$((n + 1)); echo "CHANGED $v" >> "$out"; diff -u "$root/$v" "$tmp/tree/$f" | sed 's/^/    /' >> "$out" || true; fi
+  done < "$tmp/tree/MANIFEST.sha256"
+  while read -r _ f; do [ -n "$f" ] || continue; grep -q "  $f\$" "$tmp/tree/MANIFEST.sha256" || { r=$((r + 1)); echo "REMOVED $(vpath "$f")" >> "$out"; }; done < <(cat "$root/$pdir/MANIFEST.sha256" 2>/dev/null)
+  echo "land-update --diff: $ref ($(cat "$tmp/tree/VERSION")) vs the pin: $n changed, $a added, $r removed"; cat "$out"
+  pv=$(sed -n 's/^version=v//p' "$pin" | sed -n 1p)
+  echo "--- CHANGELOG entries newer than $pv:"; awk -v pv="$pv" '/^## /{h=substr($0,4); if (h==pv) exit} {print}' "$tmp/tree/CHANGELOG.md" 2>/dev/null || true
+  exit 0
+fi
+if [ "$pkg" = land ]; then git -C "$tmp/src" show "$c:install" > "$tmp/install"; else mkdir -p "$tmp/tree"; git -C "$tmp/src" archive "$c" | tar -x -C "$tmp/tree"; git -C "$tmp/src" show "$c:MANIFEST.sha256" > "$tmp/MANIFEST.sha256" 2>/dev/null || { echo "land-update: $ref has no MANIFEST.sha256: not a release of a package" >&2; exit 1; }; fi
+if [ "$land" = 1 ] && [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then echo "land-update: --land needs a clean worktree (commit or stash your changes first)" >&2; exit 1; fi
+if [ "$pkg" = land ]; then bash "$tmp/install" --source "$src" --target "$root" "$ref"   # not exec: the trap must still remove $tmp
+else pkg_install "$root" "$pkg" "$src" "$c" "$tmp/tree" "$tmp/MANIFEST.sha256" verified || exit 1; [ -e "$root/$sf" ] || cp "$signers" "$root/$sf"; echo "land-update: $label $ref vendored into $root/$pdir (verified)"; fi
+if [ "$land" = 1 ]; then
+  . "$here/../lib/conf.sh"; conf_defaults
+  git -C "$root" fetch -q origin || { echo "land-update: cannot fetch origin" >&2; exit 1; }
+  base=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD | sed 's#^origin/##' || true); base=${base:-main}
+  if git -C "$root" cat-file -e "origin/$base:scripts/land.conf" 2>/dev/null; then conf_parse land.conf < <(git -C "$root" show "origin/$base:scripts/land.conf") || exit 2; fi
+  ver=$(sed -n 's/^version=//p' "$root/$pdir/PIN" | sed -n 1p); trl=vbm-land-update-$ver; [ "$pkg" = land ] || trl=vbm-land-update-$pkg-$ver; msg=(-m "Vendored by land-update --land from $ref.")
+  for t in $LAND_REQUIRE_TRAILERS; do msg+=(-m "$t: $trl"); done
+  paths=(scripts/land .agents/skills scripts/land.signers .github/workflows/vbm-land-update.yml scripts/land-direct scripts/land.conf); [ "$pkg" = land ] || paths=("$pdir" "$sf")
+  for p in "${paths[@]}"; do [ ! -e "$root/$p" ] || git -C "$root" add -A -- "$p"; done
+  git -C "$root" commit -q -m "chore(land): $label $ver" "${msg[@]}" || { echo "land-update: nothing to commit: the pin already is $ver" >&2; exit 1; }
+  git clone -q "$(git -C "$root" remote get-url origin)" "$tmp/old" || { echo "land-update: cannot make the pristine clone of $base" >&2; exit 1; }
+  git -C "$tmp/old" checkout -q "origin/$base" 2>/dev/null || true
+  echo "land-update: landing the update through this repository's own lander (a pristine clone of $base: the old lands the new)"
+  rc=0; ( cd "$root" && "$tmp/old/scripts/land-direct" ) || rc=$?
+  [ "$rc" = 0 ] || echo "land-update: NOT landed (the lander exited $rc): the commit is local; nothing reached $base. Look at the lander's message above." >&2
+  exit "$rc"
+fi

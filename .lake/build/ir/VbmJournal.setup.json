@@ -1,0 +1,9 @@
+{"plugins": [],
+ "package": "vbm-journal",
+ "options": {"warningAsError": true, "autoImplicit": false},
+ "name": "VbmJournal",
+ "isModule": false,
+ "importArts":
+ {"VbmJournal.Basic":
+  [["/home/dt/.firstmate-homes/vbm-foundation/projects/vbm-journal/.lake/build/lib/lean/VbmJournal/Basic.olean"]]},
+ "dynlibs": []}
