@@ -29,3 +29,8 @@ extern_lib libvbmjournalshim pkg := do
 lean_exe «vbm-journal-test» where
   root := `Main
   srcDir := "tests"
+
+/-- A measurement of reading a synthetic journal of megabytes (`tests/Bench.lean`): not run by Tier 1, nothing gates on it. -/
+lean_exe «vbm-journal-bench» where
+  root := `Bench
+  srcDir := "tests"
