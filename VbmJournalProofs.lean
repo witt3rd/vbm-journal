@@ -9,6 +9,7 @@ import VbmJournalProofs.Theorems
 import VbmJournalProofs.Impl
 import VbmJournalProofs.Transfer
 import VbmJournalProofs.Sig
+import VbmJournalProofs.SigImpl
 import VbmJournalProofs.Witness
 import VbmJournalProofs.Golden
 import VbmJournalProofs.Axioms

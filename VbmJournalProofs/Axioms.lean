@@ -25,6 +25,17 @@ run_cmd do
     -- (e) recovery
     ``VbmJournal.reopen_settles, ``VbmJournal.reopen_idempotent, ``VbmJournal.reopen_crash_safe,
     ``VbmJournal.settle_once, ``VbmJournal.settle_closes, ``VbmJournal.settle_idem, ``VbmJournal.settle_partial,
+    -- the implementation is the model (slice 2)
+    ``VbmJournal.runPlan_nocut, ``VbmJournal.runPlan_cut, ``VbmJournal.drive_planned, ``VbmJournal.drive_recover,
+    ``VbmJournal.impl_step_eq, ``VbmJournal.impl_run_eq, ``VbmJournal.impl_reachable,
+    ``VbmJournal.impl_append_only, ``VbmJournal.impl_verifies, ``VbmJournal.impl_crash_consistency, ``VbmJournal.impl_reopen_idempotent,
+    ``VbmJournal.impl_reopen_settles, ``VbmJournal.impl_stale_append, ``VbmJournal.impl_stale_recover, ``VbmJournal.impl_takeOver_fences,
+    -- the signed head
+    ``VbmJournal.sig_roundtrip, ``VbmJournal.parseDec_natDec, ``VbmJournal.verdict_none, ``VbmJournal.verdict_unreadable,
+    ``VbmJournal.verdict_bad_mac, ``VbmJournal.verdict_cut_back, ``VbmJournal.verdict_rewritten, ``VbmJournal.verdict_signed,
+    ``VbmJournal.verdict_sound, ``VbmJournal.verdict_unsigned_only, ``VbmJournal.verdict_honest, ``VbmJournal.verdict_anchored,
+    ``VbmJournal.signed_unique, ``VbmJournal.signed_append_ok, ``VbmJournal.signed_append_verifies, ``VbmJournal.signed_append_fault,
+    ``VbmJournal.signed_recover_refused, ``VbmJournal.signed_recover_ok, ``VbmJournal.signed_recover_verifies,
     -- the laws are satisfiable
     ``VbmJournal.sym_lawful, ``VbmJournal.decUnary_encUnary, ``VbmJournal.encUnary_decUnary]
   for n in theorems do

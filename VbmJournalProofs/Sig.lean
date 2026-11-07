@@ -164,6 +164,13 @@ theorem verdict_honest {i : Nat} (hi : i ≤ es.length) (hsp : sp ∉ headFrom P
   have hr := sig_roundtrip (Sig.make mac i (headFrom P P.genesis (es.take i))) hsp
   exact verdict_signed hr rfl hi rfl
 
+/-- The head of a journal of some records has no separator in it (it is a digest). -/
+theorem headFrom_clean (L : P.Lawful) {es : List Entry} (h : es ≠ []) : sp ∉ headFrom P P.genesis es := by
+  rcases List.eq_nil_or_concat es with rfl | ⟨l, b, rfl⟩
+  · exact absurd rfl h
+  · rw [List.concat_eq_append, headFrom_snoc]
+    exact (L.link_clean _ _).2
+
 /-- **An accepted signature anchors the journal** at the signed point (slice 1's `Anchored`). -/
 theorem verdict_anchored {b : Bytes} {r : Read} (hr : read P b = some r) {t : Bytes} {i k : Nat}
     (hv : verdict P mac r.entries (some t) = .ok (.signed i k)) (s : Sig) (hs : Sig.ofBytes t = some s) :

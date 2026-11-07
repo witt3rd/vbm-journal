@@ -19,7 +19,7 @@ structure Sim where
   done : Nat
 
 /-- The monad of the model: a state, and failure (the state kept when it fails). Written out, so that what it does is plain. -/
-def SimM (α : Type) : Type := Sim → Except String α × Sim
+abbrev SimM (α : Type) : Type := Sim → Except String α × Sim
 
 instance : Monad SimM where
   pure a := fun s => (Except.ok a, s)
