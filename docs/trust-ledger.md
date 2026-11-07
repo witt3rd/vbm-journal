@@ -70,5 +70,5 @@ HMAC (RFC 2104) is **not** a shim: `hmacSha256` is Lean over the `sha256` shim (
 
 ### P3. The test program (`tests/Main.lean`, `tests/crash.sh`)
 - **What:** Lean and shell, not part of the library and never linked into it. It is trusted only to fail when the shims differ from their models.
-- **Assumes:** that it checks what it says (it was checked by breaking a shim: a `write` that appends a stray byte fails the first golden case).
+- **Assumes:** that it checks what it says (it was checked by breaking a shim: a `write` that appends a stray byte fails the differential test).
 - **Plan:** accept.

@@ -230,7 +230,7 @@ def verifyCrash (path acks : String) : IO Unit := do
     let k := r.entries.length
     expect (r.entries == (List.range k).map fun i => Entry.note (noteOf (i + 1))) "crash test: the records are not the records 1..k in order"
     expect (acked ≤ k && k ≤ acked + 1) s!"crash test: {k} records, {acked} acknowledged"
-    expect (v == .signed k 0) "crash test: the signature does not cover the recovered journal"
+    expect (v == (if k = 0 then Verdict.unsigned else Verdict.signed k 0)) "crash test: the signature does not cover the recovered journal"
     IO.println s!"ran: crash test: killed after {acked} acknowledged appends; recovered {k} records ({r.tail.length} torn bytes were dropped at recovery)"
 
 def main (args : List String) : IO UInt32 := do
