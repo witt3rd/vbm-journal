@@ -31,7 +31,7 @@ def Shims.real (path : String) : Shims RealM where
   write b := liftShim (realWrite path b.toByteArray)
   fsync := liftShim (realFsync path)
   fsyncDir := liftShim (realFsyncDir path)
-  readAll := do pure ((← liftShim (realReadFile path)).map (·.toList) |>.getD [])
+  readAll := do pure ((← liftShim (realReadFile path)).getD ByteArray.empty)
   truncate n := liftShim (realTruncate path n.toUInt64)
   putSig b := liftShim (realReplace (path ++ ".sig") b.toByteArray)
   getSig := do pure ((← liftShim (realReadFile (path ++ ".sig"))).map (·.toList))
@@ -40,6 +40,14 @@ def Shims.real (path : String) : Shims RealM where
 read two ways, whatever the digest is, so a collision of the hash is the only way for two links to agree (`VbmJournalProofs.Real`). -/
 def chainInput (p b : Bytes) : Bytes := p.flatMap (fun x => [1, x]) ++ 0 :: b
 
+/-- `chainInput` with the body flat: the prefix-coded digest is short (a few dozen bytes), the body is not copied into a list. -/
+def chainInputB (p : Bytes) (b : ByteArray) : ByteArray := (p.flatMap (fun x => [1, x]) ++ [0]).toByteArray ++ b
+
+theorem chainInputB_eq (p : Bytes) (b : ByteArray) : chainInputB p b = (chainInput p b.toList).toByteArray := by
+  have : chainInput p b.toList = (p.flatMap (fun x => [1, x]) ++ [0]) ++ b.toList := by simp [chainInput]
+  rw [this, List.toByteArray_append, toByteArray_toList]
+  rfl
+
 /-- **The real parameters**: the chain is SHA-256 (`link p b` is the hex of the hash of `chainInput p b`; the genesis the hex of the hash of a
 label), the codec the unary one (lung's JSON codec is slice 3's). -/
 def Params.real : Params where
@@ -47,5 +55,9 @@ def Params.real : Params where
   link p b := hexOf (sha256L (chainInput p b))
   enc := encUnary
   dec := decUnary
+  linkB p b := hexOf (sha256 (chainInputB p b)).toList
+  decB b := decUnary b.toList
+  linkB_eq p b := by simp only [chainInputB_eq, sha256L]
+  decB_eq _ := rfl
 
 end VbmJournal

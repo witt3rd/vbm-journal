@@ -4,6 +4,7 @@ import VbmJournalProofs.Witness
 import VbmJournalProofs.SigImpl
 import VbmJournalProofs.Real
 import VbmJournalProofs.SigWorld
+import VbmJournalProofs.Flat
 /-! # The theorems rest on the standard axioms only
 
 Every theorem of slice 1 listed here uses no axiom beyond `propext`, `Classical.choice` and `Quot.sound` (no `sorryAx`, no axiom of
@@ -41,6 +42,8 @@ run_cmd do
     ``VbmJournal.signed_recover_refused, ``VbmJournal.signed_recover_ok, ``VbmJournal.signed_recover_verifies,
     ``VbmJournal.honest_mono, ``VbmJournal.honest_gate, ``VbmJournal.signed_step, ``VbmJournal.signed_reachable,
     ``VbmJournal.signed_reachable_verifies,
+    -- the flat buffer is the list (slice 3)
+    ``VbmJournal.readB_eq, ``VbmJournal.recoverPlanB_eq, ``VbmJournal.stepReplyB_eq, ``VbmJournal.verifyB_eq, ``VbmJournal.splitLineB_eq,
     -- the real parameters
     ``VbmJournal.real_lawful, ``VbmJournal.hexOf_inj, ``VbmJournal.chainInput_inj,
     -- the laws are satisfiable

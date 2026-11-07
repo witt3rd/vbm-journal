@@ -6,6 +6,7 @@ import VbmJournalProofs.World
 import VbmJournalProofs.Settle
 import VbmJournalProofs.Recovery
 import VbmJournalProofs.Theorems
+import VbmJournalProofs.Flat
 import VbmJournalProofs.Impl
 import VbmJournalProofs.Transfer
 import VbmJournalProofs.Sig

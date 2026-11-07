@@ -111,4 +111,27 @@ def step (P : Params) (st : St) : Event → St × List Effect
       | _ => (st, [])
     else (st, [])
 
+/-! ## The reply of a read, on a flat buffer
+
+The driver reads the file as a `ByteArray` and hands it to the machine as it is: `stepReplyB` is `step` on `Event.readReply g b.toList`
+(`VbmJournalProofs.Flat`, `stepReplyB_eq`), without the list. -/
+
+/-- `recoverPlan` on a flat buffer. -/
+def recoverPlanB (P : Params) (st : St) (bytes : ByteArray) : St × List Effect :=
+  match readB P bytes with
+  | none => (⟨st.gen, .broken⟩, [])
+  | some r =>
+    let ss := settleEntries r.entries
+    if bytes.size = 0 then (⟨st.gen, .busy r.head 0⟩, [])
+    else (⟨st.gen, .busy (headFrom P r.head ss) (r.entries.length + ss.length)⟩,
+          commitPlan (some (bytes.size - r.tail.length)) (encodeFrom P r.head ss) true)
+
+/-- The machine's step on the reply of a read, the bytes flat. -/
+def stepReplyB (P : Params) (st : St) (g : Nat) (bytes : ByteArray) : St × List Effect :=
+  if g = st.gen then
+    match st.mode with
+    | .reading => recoverPlanB P st bytes
+    | _ => (st, [])
+  else (st, [])
+
 end VbmJournal

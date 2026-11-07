@@ -17,11 +17,7 @@ def symB (l : Bytes) : Bytes := l.flatMap sym1
 def symLink (p b : Bytes) : Bytes := 99 :: (symB p ++ 100 :: symB b)
 
 /-- The symbolic parameters. -/
-def Params.sym : Params where
-  genesis := [101]
-  link := symLink
-  enc := encUnary
-  dec := decUnary
+def Params.sym : Params := Params.ofLists [101] symLink encUnary decUnary
 
 private theorem rep_inj : ∀ (n m : Nat) (r r' : Bytes),
     List.replicate n (97 : UInt8) ++ 98 :: r = List.replicate m 97 ++ 98 :: r' → n = m ∧ r = r' := by
@@ -119,13 +115,13 @@ private theorem symB_mem (l : Bytes) : ∀ a ∈ symB l, a = 97 ∨ a = 98 := by
 /-- The parameters meet every law: the hypothesis `Params.Lawful` of the theorems is satisfiable. -/
 theorem sym_lawful : Params.sym.Lawful where
   link_binds p p' b b' h := by
-    simp only [Params.sym, symLink, List.cons.injEq, true_and] at h
+    simp only [Params.sym, Params.ofLists, symLink, List.cons.injEq, true_and] at h
     exact symB_inj_delim _ _ _ _ h
-  link_ne_genesis p b h := by simp [Params.sym, symLink] at h
+  link_ne_genesis p b h := by simp [Params.sym, Params.ofLists, symLink] at h
   link_clean p b := by
     have hall : ∀ a ∈ Params.sym.link p b, a = 99 ∨ a = 97 ∨ a = 98 ∨ a = 100 := by
       intro a ha
-      simp only [Params.sym, symLink, List.mem_cons, List.mem_append] at ha
+      simp only [Params.sym, Params.ofLists, symLink, List.mem_cons, List.mem_append] at ha
       rcases ha with ha | ha | ha | ha
       · exact Or.inl ha
       · rcases symB_mem p a ha with h | h <;> simp [h]

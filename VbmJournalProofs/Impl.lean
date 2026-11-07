@@ -1,4 +1,5 @@
 import VbmJournalProofs.Theorems
+import VbmJournalProofs.Flat
 /-! # The implementation is the model (part 1: the shims' models and the plans)
 
 The driver (`VbmJournal.Driver`) is run over the models of the shims (`VbmJournal.Sim`). This file proves what a plan does there: it performs its
@@ -133,7 +134,7 @@ theorem drive_eq (st : St) (ev : Event) (s : Sim) :
   rcases driveRaw P Shims.sim (fun _ => pure ()) st ev s with ⟨r, s'⟩
   cases r <;> rfl
 
-theorem runPlan_ok_none (plan : List Effect) (hno : NoRead plan) (s : Sim) (r : Option Bytes) (s' : Sim)
+theorem runPlan_ok_none (plan : List Effect) (hno : NoRead plan) (s : Sim) (r : Option ByteArray) (s' : Sim)
     (h : Shims.sim.runPlan plan s = (Except.ok r, s')) : r = none := by
   rcases hc : s.cut with _ | c
   · rw [runPlan_nocut plan hno s hc] at h; simp at h; exact h.1.symm
@@ -179,7 +180,7 @@ theorem recoverPlan_noRead (st : St) (bytes : Bytes) : NoRead (recoverPlan P st 
     · exact noRead_nil
     · exact commitPlan_noRead (some (bytes.length - r.tail.length)) (encodeFrom P r.head (settleEntries r.entries)) true
 
-theorem runPlan_readAll (s : Sim) : Shims.sim.runPlan [.readAll] s = (Except.ok (some s.fs.contents), s) := rfl
+theorem runPlan_readAll (s : Sim) : Shims.sim.runPlan [.readAll] s = (Except.ok (some s.fs.contents.toByteArray), s) := rfl
 
 /-- Recovery of a writer that has just taken over: the file is read, the machine's plan is performed (or the fault comes), then acknowledged. -/
 theorem drive_recover (st : St) (hm : st.mode = .opened) (fs : Fs) (sig : Option Bytes) (cut : Option Cut) :
@@ -201,12 +202,12 @@ theorem drive_recover (st : St) (hm : st.mode = .opened) (fs : Fs) (sig : Option
   rw [drive_eq]
   cases cut with
   | none =>
-    simp [driveRaw, step, runPlan_readAll, hr, runPlan_nocut plan hno ⟨fs, sig, none, 0⟩ rfl]
+    simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, hr, runPlan_nocut plan hno ⟨fs, sig, none, 0⟩ rfl]
   | some c =>
     have h := runPlan_cut c plan hno ⟨fs, sig, some c, 0⟩ rfl
     by_cases hin : c.n < plan.length
-    · simp [driveRaw, step, runPlan_readAll, hr, h, hin]
-    · simp [driveRaw, step, runPlan_readAll, hr, h, hin]
+    · simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, hr, h, hin]
+    · simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, hr, h, hin]
 
 /-! ## One event, by cases -/
 

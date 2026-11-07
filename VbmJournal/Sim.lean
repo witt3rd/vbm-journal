@@ -48,7 +48,7 @@ def Shims.sim : Shims SimM where
   write b := simEff (·.run (.write b))
   fsync := simEff (·.run .fsync)
   fsyncDir := simEff (·.run .fsyncDir)
-  readAll := fun s => (Except.ok s.fs.contents, s)
+  readAll := fun s => (Except.ok s.fs.contents.toByteArray, s)
   truncate n := simEff (·.run (.truncate n))
   putSig b := fun s => (Except.ok (), { s with sig := some b })
   getSig := fun s => (Except.ok s.sig, s)

@@ -45,12 +45,13 @@ def gateMsg (P : Params) (mac : Nat → Digest → Bytes) (sig : Option Bytes) (
     | .error e => some e
     | .ok _ => none
 
-theorem sigGate_sim (bytes : Bytes) (s : Sim) :
-    sigGate P mac Shims.sim bytes s = match gateMsg P mac s.sig bytes with
+theorem sigGate_sim (bytes : ByteArray) (s : Sim) :
+    sigGate P mac Shims.sim bytes s = match gateMsg P mac s.sig bytes.toList with
       | none => (Except.ok (), s)
       | some e => (Except.error e, s) := by
   unfold sigGate gateMsg
-  cases hr : read P bytes with
+  rw [readB_eq]
+  cases hr : read P bytes.toList with
   | none => rfl
   | some r =>
     simp only
@@ -126,13 +127,13 @@ theorem driveSigned_recover (st : St) (hm : st.mode = .opened) (fs : Fs) (sig : 
         simp at hbk
     cases cut with
     | none =>
-      simp [driveRaw, step, runPlan_readAll, sigGate_sim, hg, hr, runPlan_nocut plan hno ⟨fs, sig, none, 0⟩ rfl, hne]
+      simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, sigGate_sim, hg, hr, runPlan_nocut plan hno ⟨fs, sig, none, 0⟩ rfl, hne]
     | some c =>
       have h := runPlan_cut c plan hno ⟨fs, sig, some c, 0⟩ rfl
       by_cases hin : c.n < plan.length
-      · simp [driveRaw, step, runPlan_readAll, sigGate_sim, hg, hr, h, hin]
-      · simp [driveRaw, step, runPlan_readAll, sigGate_sim, hg, hr, h, hin, hne]
-  · simp [driveRaw, step, runPlan_readAll, sigGate_sim, hg]
+      · simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, sigGate_sim, hg, hr, h, hin]
+      · simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, sigGate_sim, hg, hr, h, hin, hne]
+  · simp [driveRaw, step, runPlan_readAll, stepReplyB_eq, toList_toByteArray, sigGate_sim, hg]
 
 /-! ## An append that completes -/
 

@@ -21,7 +21,7 @@ structure Shims (m : Type → Type) where
   /-- Make the journal file's directory entry durable. -/
   fsyncDir : m Unit
   /-- The whole journal file (empty when there is none). -/
-  readAll : m Bytes
+  readAll : m ByteArray
   /-- Cut the journal file back to this length, durably. -/
   truncate : Nat → m Unit
   /-- Replace the signature file with these bytes, atomically (all of them or none), durably. -/
@@ -33,7 +33,7 @@ section
 variable {m : Type → Type} [Monad m] [MonadExcept String m]
 
 /-- Perform one effect; a `readAll` returns the bytes. -/
-def Shims.perform (sh : Shims m) : Effect → m (Option Bytes)
+def Shims.perform (sh : Shims m) : Effect → m (Option ByteArray)
   | .write b => do sh.write b; pure none
   | .fsync => do sh.fsync; pure none
   | .fsyncDir => do sh.fsyncDir; pure none
@@ -41,7 +41,7 @@ def Shims.perform (sh : Shims m) : Effect → m (Option Bytes)
   | .truncate n => do sh.truncate n; pure none
 
 /-- Perform a plan in order; the bytes of its `readAll`, if it has one. -/
-def Shims.runPlan (sh : Shims m) : List Effect → m (Option Bytes)
+def Shims.runPlan (sh : Shims m) : List Effect → m (Option ByteArray)
   | [] => pure none
   | e :: es => do
     let r ← sh.perform e
@@ -54,13 +54,13 @@ def ack (P : Params) (st : St) : St :=
 
 /-- One event of the writer, driven: the machine's plan performed, its read fed back, its plan acknowledged. `gate` sees the bytes of a read before
 the machine does, and may refuse (throw). An exception of a shim or of the gate escapes. -/
-def driveRaw (P : Params) (sh : Shims m) (gate : Bytes → m Unit) (st : St) (ev : Event) : m St := do
+def driveRaw (P : Params) (sh : Shims m) (gate : ByteArray → m Unit) (st : St) (ev : Event) : m St := do
   let (st1, plan) := step P st ev
   match ← sh.runPlan plan with
   | none => pure (ack P st1)
   | some bytes =>
     gate bytes
-    let (st2, plan2) := step P st1 (.readReply st1.gen bytes)
+    let (st2, plan2) := stepReplyB P st1 st1.gen bytes
     let _ ← sh.runPlan plan2
     pure (ack P st2)
 
@@ -82,8 +82,8 @@ def signHead (mac : Nat → Digest → Bytes) (sh : Shims m) (st : St) : m Unit 
 
 /-- Recovery's check of the journal against its signature, on the bytes it read. A journal that fails verification is the machine's to refuse; a
 journal whose signature fails is refused here, before the machine writes anything. -/
-def sigGate (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) (bytes : Bytes) : m Unit :=
-  match read P bytes with
+def sigGate (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) (bytes : ByteArray) : m Unit :=
+  match readB P bytes with
   | none => pure ()
   | some r => do
     match verdict P mac r.entries (← sh.getSig) with
@@ -99,7 +99,7 @@ def driveSigned (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) (st
 
 /-- **The reader**: a journal's entries, its head and its signature's verdict, with no writer (fails closed). -/
 def readSigned (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) : m (Read × Verdict) := do
-  match read P (← sh.readAll) with
+  match readB P (← sh.readAll) with
   | none => throw "journal: fails verification (edited, reordered, or a record missing)"
   | some r =>
     match verdict P mac r.entries (← sh.getSig) with

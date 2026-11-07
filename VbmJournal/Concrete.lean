@@ -39,10 +39,7 @@ def fnv (b : Bytes) : Nat :=
   b.foldl (fun h x => ((h ^^^ x.toNat) * 1099511628211) % 2 ^ 64) 14695981039346656037
 
 /-- The toy parameters. -/
-def Params.toy : Params where
-  genesis := hex16 (fnv (ascii "vbm-journal-v1"))
-  link prev body := hex16 (fnv (prev ++ nl :: body))
-  enc := encUnary
-  dec := decUnary
+def Params.toy : Params :=
+  Params.ofLists (hex16 (fnv (ascii "vbm-journal-v1"))) (fun prev body => hex16 (fnv (prev ++ nl :: body))) encUnary decUnary
 
 end VbmJournal
