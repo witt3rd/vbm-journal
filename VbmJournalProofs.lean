@@ -6,6 +6,9 @@ import VbmJournalProofs.World
 import VbmJournalProofs.Settle
 import VbmJournalProofs.Recovery
 import VbmJournalProofs.Theorems
+import VbmJournalProofs.Impl
+import VbmJournalProofs.Transfer
+import VbmJournalProofs.Sig
 import VbmJournalProofs.Witness
 import VbmJournalProofs.Golden
 import VbmJournalProofs.Axioms
