@@ -7,3 +7,4 @@ import VbmJournal.Sha256
 import VbmJournal.Sig
 import VbmJournal.Driver
 import VbmJournal.Real
+import VbmJournal.Sim
