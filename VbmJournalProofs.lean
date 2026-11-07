@@ -10,6 +10,7 @@ import VbmJournalProofs.Impl
 import VbmJournalProofs.Transfer
 import VbmJournalProofs.Sig
 import VbmJournalProofs.SigImpl
+import VbmJournalProofs.Real
 import VbmJournalProofs.Witness
 import VbmJournalProofs.Golden
 import VbmJournalProofs.Axioms

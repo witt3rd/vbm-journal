@@ -1,6 +1,8 @@
 import Lean
 import VbmJournalProofs.Theorems
 import VbmJournalProofs.Witness
+import VbmJournalProofs.SigImpl
+import VbmJournalProofs.Real
 /-! # The theorems rest on the standard axioms only
 
 Every theorem of slice 1 listed here uses no axiom beyond `propext`, `Classical.choice` and `Quot.sound` (no `sorryAx`, no axiom of
@@ -36,6 +38,8 @@ run_cmd do
     ``VbmJournal.verdict_sound, ``VbmJournal.verdict_unsigned_only, ``VbmJournal.verdict_honest, ``VbmJournal.verdict_anchored,
     ``VbmJournal.signed_unique, ``VbmJournal.signed_append_ok, ``VbmJournal.signed_append_verifies, ``VbmJournal.signed_append_fault,
     ``VbmJournal.signed_recover_refused, ``VbmJournal.signed_recover_ok, ``VbmJournal.signed_recover_verifies,
+    -- the real parameters
+    ``VbmJournal.real_lawful, ``VbmJournal.hexOf_inj, ``VbmJournal.chainInput_inj,
     -- the laws are satisfiable
     ``VbmJournal.sym_lawful, ``VbmJournal.decUnary_encUnary, ``VbmJournal.encUnary_decUnary]
   for n in theorems do
