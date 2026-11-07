@@ -80,30 +80,42 @@ def opened : List WEvent := [.takeOver, .recover 1 none]
 def caseEmpty : String :=
   "## empty journal\n  start\n    " ++ showFile [] ++ "\n" ++ trace World.init opened
 
+def evsOne : List WEvent := opened ++ [.append 1 (.note 7) none]
+
 /-- 2. One record, and the file it leaves. -/
 def caseOne : String :=
-  let evs := opened ++ [.append 1 (.note 7) none]
+  let evs := evsOne
   "## one record\n" ++ trace World.init evs ++ "  file\n" ++ showLines (World.init.run P evs)
+
+def preTorn : List WEvent := opened ++ [.append 1 (.note 1) none, .append 1 (.note 2) none]
+def evsTorn : List WEvent := [.append 1 (.note 3) (some ⟨1, 9, false⟩), .takeOver, .recover 2 none, .append 2 (.note 4) none]
 
 /-- 3. A torn tail: a crash in the middle of the third append; recovery drops it; the acknowledged records survive. -/
 def caseTorn : String :=
-  let pre := opened ++ [.append 1 (.note 1) none, .append 1 (.note 2) none]
-  let evs := [.append 1 (.note 3) (some ⟨1, 9, false⟩), .takeOver, .recover 2 none, .append 2 (.note 4) none]
+  let pre := preTorn
+  let evs := evsTorn
   let w1 := World.init.run P pre
   "## torn tail\n" ++ trace World.init pre ++ "  file before the crash\n" ++ showLines w1
     ++ trace w1 evs ++ "  file after recovery and one more append\n" ++ showLines (w1.run P evs)
 
+def preStale : List WEvent := opened ++ [.append 1 (.note 1) none]
+def evsStale : List WEvent := [.takeOver, .append 1 (.note 99) none, .recover 1 none, .recover 2 none, .append 1 (.note 98) none, .append 2 (.note 2) none]
+
 /-- 4. A stale writer: after the take-over, the old generation is refused and writes nothing. -/
 def caseStale : String :=
-  let pre := opened ++ [.append 1 (.note 1) none]
-  let evs := [.takeOver, .append 1 (.note 99) none, .recover 1 none, .recover 2 none, .append 1 (.note 98) none, .append 2 (.note 2) none]
+  let pre := preStale
+  let evs := evsStale
   let w1 := World.init.run P pre
   "## stale writer\n" ++ trace World.init pre ++ trace w1 evs ++ "  file\n" ++ showLines (w1.run P evs)
 
+def preInflight : List WEvent :=
+  opened ++ [.append 1 (.call 5) none, .append 1 (.call 6) none, .append 1 (.done 5 false) none, .append 1 (.note 9) (some ⟨2, 0, false⟩)]
+def evsInflight : List WEvent := [.takeOver, .recover 2 none, .takeOver, .recover 3 none]
+
 /-- 5. A call in flight at a crash: recovery settles it as interrupted, once; a second recovery adds nothing. -/
 def caseInflight : String :=
-  let pre := opened ++ [.append 1 (.call 5) none, .append 1 (.call 6) none, .append 1 (.done 5 false) none, .append 1 (.note 9) (some ⟨2, 0, false⟩)]
-  let evs := [.takeOver, .recover 2 none, .takeOver, .recover 3 none]
+  let pre := preInflight
+  let evs := evsInflight
   let w1 := World.init.run P pre
   "## call in flight\n" ++ trace World.init pre ++ trace w1 evs ++ "  file\n" ++ showLines (w1.run P evs)
 
@@ -116,10 +128,20 @@ def swapFirstTwo (b : Bytes) : Bytes :=
   | (l1 :: l2 :: rest, t) => frame l2 ++ frame l1 ++ (rest.map frame).foldr (· ++ ·) [] ++ t
   | _ => b
 
+/-- The journal of the tamper case: three records. -/
+def goodFile : Bytes :=
+  (World.init.run P (opened ++ [.append 1 (.note 1) none, .append 1 (.note 2) none, .append 1 (.note 3) none])).fs.contents
+
+/-- The tampered files of the tamper case, named. -/
+def tamperFiles : List (String × Bytes) :=
+  let good := goodFile
+  let (ls, _) := parseLines good
+  [("intact", good), ("edited", flip good ((ls.getD 0 []).length - 1)), ("swapped", swapFirstTwo good),
+   ("deleted", frame (ls.getD 0 []) ++ frame (ls.getD 2 [])), ("cut", (ls.take 2).foldr (fun l acc => frame l ++ acc) [])]
+
 /-- 6. A chain tamper: an edited record, two reordered records, a deleted record (all fail verification), and a cut at the end (verifies: only the signed head, slice 2, catches it). -/
 def caseTamper : String :=
-  let evs := opened ++ [.append 1 (.note 1) none, .append 1 (.note 2) none, .append 1 (.note 3) none]
-  let good := (World.init.run P evs).fs.contents
+  let good := goodFile
   let (ls, _) := parseLines good
   let dropMiddle := frame (ls.getD 0 []) ++ frame (ls.getD 2 [])
   let cutEnd := (ls.take 2).foldr (fun l acc => frame l ++ acc) []
@@ -135,6 +157,11 @@ def caseTamper : String :=
   s!"  records 1 and 2 swapped\n    {showFile (swapFirstTwo good)}\n" ++
   s!"  record 2 deleted\n    {showFile dropMiddle}\n" ++
   s!"  last record cut off (the chain alone cannot tell; the anchor does)\n    {showFile cutEnd}\n"
+
+/-- The scripts of the cases (events from the start), for the differential test of the implementation. -/
+def scripts : List (String × List WEvent) :=
+  [("empty", opened), ("one record", evsOne), ("torn tail", preTorn ++ evsTorn), ("stale writer", preStale ++ evsStale),
+   ("call in flight", preInflight ++ evsInflight)]
 
 /-- The golden text. -/
 def golden : String :=
