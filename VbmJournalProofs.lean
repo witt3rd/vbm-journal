@@ -1,1 +1,11 @@
-import VbmJournal
+import VbmJournalProofs.Basic
+import VbmJournalProofs.Laws
+import VbmJournalProofs.Chain
+import VbmJournalProofs.Fs
+import VbmJournalProofs.World
+import VbmJournalProofs.Settle
+import VbmJournalProofs.Recovery
+import VbmJournalProofs.Theorems
+import VbmJournalProofs.Witness
+import VbmJournalProofs.Golden
+import VbmJournalProofs.Axioms

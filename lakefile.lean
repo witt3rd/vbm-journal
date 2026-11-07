@@ -9,6 +9,7 @@ package «vbm-journal» where
 lean_lib VbmJournal where
   globs := #[.andSubmodules `VbmJournal]
 
-/-- The proofs: may import `Std` and `Lean`; never linked. -/
+/-- The proofs: may import `Std` and `Lean`; never linked. Built by default, so that `lake build` checks them. -/
+@[default_target]
 lean_lib VbmJournalProofs where
   globs := #[.andSubmodules `VbmJournalProofs]

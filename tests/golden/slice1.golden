@@ -1,0 +1,125 @@
+# vbm-journal slice 1 golden (toy digest: FNV-1a 64, hex; slice 2 uses SHA-256)
+## empty journal
+  start
+    verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  takeOver
+    gen=1 mode=opened verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  recover gen=1
+    plan [readAll]
+    gen=1 mode=ready count=0 verify: ok entries=[] head=280f14a166ff76e8 torn=0
+## one record
+  takeOver
+    gen=1 mode=opened verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  recover gen=1
+    plan [readAll]
+    gen=1 mode=ready count=0 verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  append gen=1 note 7
+    plan [write 94c76715594d9eb3 n1111111\n; fsync; fsyncDir]
+    gen=1 mode=ready count=1 verify: ok entries=[note 7] head=94c76715594d9eb3 torn=0
+  file
+    | 94c76715594d9eb3 n1111111
+## torn tail
+  takeOver
+    gen=1 mode=opened verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  recover gen=1
+    plan [readAll]
+    gen=1 mode=ready count=0 verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  append gen=1 note 1
+    plan [write aadcf581f96a4d2d n1\n; fsync; fsyncDir]
+    gen=1 mode=ready count=1 verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  append gen=1 note 2
+    plan [write cb3708d962cabd0c n11\n; fsync]
+    gen=1 mode=ready count=2 verify: ok entries=[note 1, note 2] head=cb3708d962cabd0c torn=0
+  file before the crash
+    | aadcf581f96a4d2d n1
+    | cb3708d962cabd0c n11
+  append gen=1 note 3 crash-after=1 keep=9 vanish=false
+    plan [write 1b0b7bd767b740a3 n111\n; fsync]
+    gen=1 mode=idle verify: ok entries=[note 1, note 2] head=cb3708d962cabd0c torn=9
+  takeOver
+    gen=2 mode=opened verify: ok entries=[note 1, note 2] head=cb3708d962cabd0c torn=9
+  recover gen=2
+    plan [readAll; truncate 41; fsyncDir]
+    gen=2 mode=ready count=2 verify: ok entries=[note 1, note 2] head=cb3708d962cabd0c torn=0
+  append gen=2 note 4
+    plan [write abc401053c62b816 n1111\n; fsync]
+    gen=2 mode=ready count=3 verify: ok entries=[note 1, note 2, note 4] head=abc401053c62b816 torn=0
+  file after recovery and one more append
+    | aadcf581f96a4d2d n1
+    | cb3708d962cabd0c n11
+    | abc401053c62b816 n1111
+## stale writer
+  takeOver
+    gen=1 mode=opened verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  recover gen=1
+    plan [readAll]
+    gen=1 mode=ready count=0 verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  append gen=1 note 1
+    plan [write aadcf581f96a4d2d n1\n; fsync; fsyncDir]
+    gen=1 mode=ready count=1 verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  takeOver
+    gen=2 mode=opened verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  append gen=1 note 99
+    refused
+    gen=2 mode=opened verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  recover gen=1
+    refused
+    gen=2 mode=opened verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  recover gen=2
+    plan [readAll; truncate 20; fsyncDir]
+    gen=2 mode=ready count=1 verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  append gen=1 note 98
+    refused
+    gen=2 mode=ready count=1 verify: ok entries=[note 1] head=aadcf581f96a4d2d torn=0
+  append gen=2 note 2
+    plan [write cb3708d962cabd0c n11\n; fsync]
+    gen=2 mode=ready count=2 verify: ok entries=[note 1, note 2] head=cb3708d962cabd0c torn=0
+  file
+    | aadcf581f96a4d2d n1
+    | cb3708d962cabd0c n11
+## call in flight
+  takeOver
+    gen=1 mode=opened verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  recover gen=1
+    plan [readAll]
+    gen=1 mode=ready count=0 verify: ok entries=[] head=280f14a166ff76e8 torn=0
+  append gen=1 call 5
+    plan [write 3012e8052dabfa48 c11111\n; fsync; fsyncDir]
+    gen=1 mode=ready count=1 verify: ok entries=[call 5] head=3012e8052dabfa48 torn=0
+  append gen=1 call 6
+    plan [write a332fb3a2d27ac6e c111111\n; fsync]
+    gen=1 mode=ready count=2 verify: ok entries=[call 5, call 6] head=a332fb3a2d27ac6e torn=0
+  append gen=1 done 5 ok
+    plan [write 7f9760126b94a44e dk11111\n; fsync]
+    gen=1 mode=ready count=3 verify: ok entries=[call 5, call 6, done 5 ok] head=7f9760126b94a44e torn=0
+  append gen=1 note 9 crash-after=2 keep=0 vanish=false
+    plan [write 9038cbb9f055e1d1 n111111111\n; fsync]
+    gen=1 mode=idle verify: ok entries=[call 5, call 6, done 5 ok, note 9] head=9038cbb9f055e1d1 torn=0
+  takeOver
+    gen=2 mode=opened verify: ok entries=[call 5, call 6, done 5 ok, note 9] head=9038cbb9f055e1d1 torn=0
+  recover gen=2
+    plan [readAll; truncate 102; write b97f8db8dc0e3a19 di111111\n; fsync; fsyncDir]
+    gen=2 mode=ready count=5 verify: ok entries=[call 5, call 6, done 5 ok, note 9, done 6 interrupted] head=b97f8db8dc0e3a19 torn=0
+  takeOver
+    gen=3 mode=opened verify: ok entries=[call 5, call 6, done 5 ok, note 9, done 6 interrupted] head=b97f8db8dc0e3a19 torn=0
+  recover gen=3
+    plan [readAll; truncate 128; fsyncDir]
+    gen=3 mode=ready count=5 verify: ok entries=[call 5, call 6, done 5 ok, note 9, done 6 interrupted] head=b97f8db8dc0e3a19 torn=0
+  file
+    | 3012e8052dabfa48 c11111
+    | a332fb3a2d27ac6e c111111
+    | 7f9760126b94a44e dk11111
+    | 9038cbb9f055e1d1 n111111111
+    | b97f8db8dc0e3a19 di111111
+## chain tamper
+  intact
+    verify: ok entries=[note 1, note 2, note 3] head=1b0b7bd767b740a3 torn=0
+  record 1 edited (one byte of the body flipped)
+    verify: FAILED (fails closed)
+    recovery: mode=broken plan []
+  records 1 and 2 swapped
+    verify: FAILED (fails closed)
+  record 2 deleted
+    verify: FAILED (fails closed)
+  last record cut off (the chain alone cannot tell; the anchor does)
+    verify: ok entries=[note 1, note 2] head=cb3708d962cabd0c torn=0
