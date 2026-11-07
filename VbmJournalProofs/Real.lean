@@ -42,15 +42,21 @@ theorem hexOf_inj : ∀ (a b : Bytes), hexOf a = hexOf b → a = b := by
       have : x = y := by apply UInt8.toNat_inj.1; omega
       rw [this, ih ys (by simpa [hexOf] using h3)]
 
+theorem hexOf_ge (b : Bytes) : ∀ x ∈ hexOf b, 48 ≤ x.toNat := by
+  intro x hx
+  simp only [hexOf, List.mem_flatMap, List.mem_cons, List.not_mem_nil, or_false] at hx
+  obtain ⟨y, _, hy⟩ := hx
+  have hyl := y.toNat_lt
+  rcases hy with rfl | rfl
+  · exact (hexDigit_lt (y.toNat / 16) (by omega)).1
+  · exact (hexDigit_lt (y.toNat % 16) (by omega)).1
+
+/-- A digest has no quote in it (the JSON line and the signature file end it with one). -/
+theorem hexOf_no_quote (b : Bytes) : (34 : UInt8) ∉ hexOf b := by
+  intro h; have := hexOf_ge b _ h; simp at this
+
 theorem hexOf_clean (b : Bytes) : nl ∉ hexOf b ∧ sp ∉ hexOf b := by
-  have key : ∀ x ∈ hexOf b, 48 ≤ x.toNat := by
-    intro x hx
-    simp only [hexOf, List.mem_flatMap, List.mem_cons, List.not_mem_nil, or_false] at hx
-    obtain ⟨y, _, hy⟩ := hx
-    have hyl := y.toNat_lt
-    rcases hy with rfl | rfl
-    · exact (hexDigit_lt (y.toNat / 16) (by omega)).1
-    · exact (hexDigit_lt (y.toNat % 16) (by omega)).1
+  have key := hexOf_ge b
   constructor
   · intro h; have := key _ h; simp [nl] at this
   · intro h; have := key _ h; simp [sp] at this

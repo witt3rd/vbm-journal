@@ -165,7 +165,15 @@ def goldenTests (dir : String) : IO Unit := do
 
 def lcg (s : Nat) : Nat := (s * 6364136223846793005 + 1442695040888963407) % 2 ^ 64
 
-def randomScript (seed : Nat) (len : Nat) : List WEvent := Id.run do
+/-- A host record from its text (the text must be a well-formed body). -/
+def mkBody (s : String) : Entry :=
+  let b := (ascii s).toByteArray
+  if h : bodyWf b.toList = true then .body ⟨b, h⟩ else .note 0
+
+def sampleBodies : List String :=
+  [r#"{"k":"meta","t":"limits"}"#, r#"{"h":0,"k":"put","t":"alpha \"q\" \n beta"}"#, r#"{"e":{"k":"cancel"},"k":"ev"}"#]
+
+def randomScript (seed : Nat) (len : Nat) (bodies : Bool := false) : List WEvent := Id.run do
   let mut s := seed
   let mut gen := 1
   let mut out : List WEvent := [.takeOver, .recover 1 none]
@@ -183,7 +191,7 @@ def randomScript (seed : Nat) (len : Nat) : List WEvent := Id.run do
       | 3 => .crash (b % 30) (b / 30 % 2 = 0)
       | 4 | 5 => .append g (.call (b % 4)) cut
       | 6 | 7 => .append g (.done (b % 4) (b / 4 % 2 = 0)) cut
-      | _ => .append g (.note (b % 6)) cut
+      | _ => if bodies && b % 2 = 0 then .append g (mkBody (sampleBodies.getD (b / 2 % 3) "")) cut else .append g (.note (b % 6)) cut
     if a % 16 = 0 then gen := gen + 1
     out := out ++ [ev]
   return out
@@ -192,6 +200,63 @@ def randomTests (dir : String) : IO Unit := do
   for seed in List.range 400 do
     differential Params.real dir s!"random-{seed}" (randomScript (seed + 1) 20)
   IO.println "ran: random scripts with crashes, the driver over the real shims against the slice 1 model (SHA-256 chain)"
+
+/-! ## The JSON-lines journal
+
+The library's second format (`Params.jsonl`): a JSON line with its digest first, the chain input `prev "\n" body`, the signature file as JSON. The known answers were made
+by an independent program (Python's `hashlib` and `hmac`), the label and the key are synthetic. -/
+
+def jlabel : Bytes := ascii "test-journal-v1"
+def PJ : Params := Params.jsonl jlabel
+
+def jsonlGenesis : String := "5f81a4ebd298c3439b93b2804ee38f74cd6b7de8db9008d57ee44631748115e4"
+def jsonlText : String :=
+  "{\"c\":\"c2fd3b08e3bc57c006ce765969db8ce703acc21e0db881abedd2272268baadc1\",\"k\":\"meta\",\"t\":\"limits\"}\n" ++
+  "{\"c\":\"a3a7f60f5920ac5ea3086555fbff6052c819459df8b88ad1253e9ead302f0fe7\",\"h\":0,\"k\":\"put\",\"t\":\"alpha \\\"q\\\" \\n beta\"}\n" ++
+  "{\"c\":\"7478f45c92d4cebd3252e30b8aba6c0c55fa446166eb2f30611a076ec6133455\",\"e\":{\"k\":\"cancel\"},\"k\":\"ev\"}\n"
+def jsonlHead : String := "7478f45c92d4cebd3252e30b8aba6c0c55fa446166eb2f30611a076ec6133455"
+def jsonlSig : String :=
+  "{\"head\":\"7478f45c92d4cebd3252e30b8aba6c0c55fa446166eb2f30611a076ec6133455\",\"index\":3,\"mac\":\"3fe92e55bbb4831c0e1327e285df67acfe5f25717cfec000eb37ddc4c1dc1671\"}"
+
+def jsonlTests (dir : String) : IO Unit := do
+  expect (showBytes PJ.genesis == jsonlGenesis) "jsonl: the genesis digest"
+  let es := sampleBodies.map mkBody
+  let bytes := encodeFrom PJ PJ.genesis es
+  expect (showBytes bytes == jsonlText) "jsonl: the lines the library writes are not the known lines"
+  expect (showBytes (headFrom PJ PJ.genesis es) == jsonlHead) "jsonl: the head"
+  expect (showBytes (PJ.sigEnc (Sig.make macK 3 (headFrom PJ PJ.genesis es))) == jsonlSig) "jsonl: the signature file the library writes is not the known file"
+  expect ((PJ.sigDec (ascii jsonlSig)) == some (Sig.make macK 3 (headFrom PJ PJ.genesis es))) "jsonl: the signature file does not read back"
+  -- the known journal reads, flat and as a list, to the same entries and the same head
+  let known := ascii jsonlText
+  match readB PJ known.toByteArray, read PJ known with
+  | some a, some b =>
+    expect (a == b) "jsonl: the flat reader and the list reader differ"
+    expect (a.entries == es && showBytes a.head == jsonlHead && a.tail == []) "jsonl: the known journal reads wrongly"
+  | _, _ => fail "jsonl: the known journal does not verify"
+  -- a torn tail is dropped, whatever the cut
+  for k in List.range 40 do
+    match readB PJ (known ++ (ascii jsonlText).take (k + 1)).toByteArray with
+    | some a => expect (a.entries.length ≥ 3) s!"jsonl: a torn tail of {k + 1} bytes lost records"
+    | none => fail s!"jsonl: a torn tail of {k + 1} bytes is refused"
+  -- fail closed: an edit, a line the writer would not write, a line out of order, a missing digest
+  let refuse (what : String) (t : String) : IO Unit :=
+    expect ((readB PJ (ascii t).toByteArray).isNone) s!"jsonl: {what} was accepted"
+  refuse "an edited body" (jsonlText.replace "limits" "limitz")
+  refuse "an edited digest" (jsonlText.replace "c2fd3b08" "c2fd3b09")
+  refuse "a line with whitespace" (jsonlText.replace "\"k\":\"meta\"" "\"k\": \"meta\"")
+  refuse "a line whose digest is not first" (jsonlText.replace "{\"c\":\"c2fd3b08e3bc57c006ce765969db8ce703acc21e0db881abedd2272268baadc1\",\"k\":\"meta\",\"t\":\"limits\"}" "{\"k\":\"meta\",\"c\":\"c2fd3b08e3bc57c006ce765969db8ce703acc21e0db881abedd2272268baadc1\",\"t\":\"limits\"}")
+  refuse "an empty line" ("\n" ++ jsonlText)
+  let ls := jsonlText.splitOn "\n"
+  refuse "swapped records" (ls[1]! ++ "\n" ++ ls[0]! ++ "\n" ++ ls[2]! ++ "\n")
+  refuse "a deleted record" (ls[0]! ++ "\n" ++ ls[2]! ++ "\n")
+  -- the library's own entries have lines too, and every entry reads back
+  for e in [Entry.note 3, .call 2, .done 1 true, .done 4 false] ++ es do
+    expect (PJ.dec (PJ.enc e) == some e) "jsonl: an entry does not read back"
+    expect (PJ.decB (PJ.enc e).toByteArray == some e) "jsonl: an entry does not read back (flat)"
+  -- the driver over the real shims against the model, on random scripts with crashes, host records among them
+  for seed in List.range 150 do
+    differential PJ dir s!"jsonl-{seed}" (randomScript (seed + 7) 20 (bodies := true))
+  IO.println "ran: jsonl: known lines and signature, fail-closed cases, and 150 random scripts with crashes, the driver over the real shims against the model"
 
 /-! ## The real crash test -/
 
@@ -242,5 +307,6 @@ def main (args : List String) : IO UInt32 := do
     let dir ← IO.FS.createTempDir
     goldenTests dir.toString
     randomTests dir.toString
+    jsonlTests dir.toString
     IO.FS.removeDirAll dir
     pure 0
