@@ -60,6 +60,8 @@ Standard axioms only, no `sorry` (`VbmJournalProofs/Axioms.lean` fails the build
 
 ## What slice 3 (lung's switch) must change
 
+(Items 1 to 3 are done: `docs/slice3.md`.)
+
 1. **The line format and the chain input.** Lung's journals are JSON lines with the digest in the line, hashed as `sha256(prev "\n" body)`: they do not verify under `Params.real`. Either a one-time migration (read with the old code, write with the new) or make the line format a parameter of the model (`lineOf`, `splitLine`, `frame`: slice 1's `Basic` and the proofs that depend on it) and the chain input unambiguous for every `prev` (`link_binds` is universal).
 2. **The entry and its codec.** `Entry` is `note`/`call`/`done`; lung's records are `SEvent`/`Action` with out-of-line text. Either map lung's records onto the three (`note` carries a handle) or make `Entry` a parameter, and give lung's JSON codec as `Params.enc`/`dec` with the codec laws (round trip, canonical, no newline).
 3. **Bytes.** `Bytes` is `List UInt8` (the proofs' shape): reading a journal of megabytes allocates a list cell per byte. Before lung's journals (megabytes) run on it, `Bytes` should be `ByteArray` in the compiled code with a proof that the two agree (or a streaming read).
