@@ -20,6 +20,7 @@ def showEntry : Entry → String
   | .note n => s!"note {n}"
   | .call i => s!"call {i}"
   | .done i b => s!"done {i} {if b then "interrupted" else "ok"}"
+  | .body b => s!"body {showBytes b.bytes.toList}"
 
 def showMode : Mode → String
   | .idle => "idle"

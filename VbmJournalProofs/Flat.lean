@@ -11,85 +11,11 @@ The flat forms of the digest and of the codec (`Params.linkB`, `decB`) are field
 so the refinement holds of whatever digest and codec the parameters carry. Nothing here is assumed. -/
 namespace VbmJournal
 
-/-! ## Finding a byte -/
-
-theorem findByte_some (b : ByteArray) (x : UInt8) : ∀ i j, findByte b x i = some j →
-    ∃ pre rest, b.toList.drop i = pre ++ x :: rest ∧ x ∉ pre ∧ j = i + pre.length ∧ rest = b.toList.drop (j + 1) := by
-  intro i j h
-  fun_induction findByte b x i generalizing j with
-  | case1 i hi hx =>
-    simp only [Option.some.injEq] at h
-    subst h
-    have hl : i < b.toList.length := by simpa using hi
-    refine ⟨[], b.toList.drop (i + 1), ?_, by simp, by simp, rfl⟩
-    rw [List.drop_eq_getElem_cons hl]
-    simp only [List.nil_append, List.cons.injEq, and_true]
-    simpa [toList_eq, ByteArray.getElem_eq_getElem_data] using hx
-  | case2 i hi hx ih =>
-    obtain ⟨pre, rest, h1, h2, h3, h4⟩ := ih j h
-    have hl : i < b.toList.length := by simpa using hi
-    refine ⟨b[i] :: pre, rest, ?_, ?_, ?_, h4⟩
-    · rw [List.drop_eq_getElem_cons hl, h1]
-      simp [toList_eq]
-      exact (ByteArray.getElem_eq_getElem_data).symm
-    · simp only [List.mem_cons, not_or]
-      exact ⟨fun e => hx e.symm, h2⟩
-    · simp; omega
-  | case3 i hi => simp at h
-
-theorem findByte_none (b : ByteArray) (x : UInt8) : ∀ i, findByte b x i = none → x ∉ b.toList.drop i := by
-  intro i h
-  fun_induction findByte b x i with
-  | case1 i hi hx => simp at h
-  | case2 i hi hx ih =>
-    have hl : i < b.toList.length := by simpa using hi
-    rw [List.drop_eq_getElem_cons hl]
-    simp only [List.mem_cons, not_or]
-    exact ⟨fun e => hx (by simpa [toList_eq, ByteArray.getElem_eq_getElem_data] using e.symm), ih h⟩
-  | case3 i hi =>
-    have : b.toList.drop i = [] := List.drop_eq_nil_of_le (by simp at hi ⊢; omega)
-    simp [this]
-
-theorem splitLine_none : ∀ (l : Bytes), sp ∉ l → splitLine l = none := by
-  intro l
-  induction l with
-  | nil => intro _; rfl
-  | cons b l ih =>
-    intro h
-    have hb : b ≠ sp := fun e => h (by simp [e])
-    have hl : sp ∉ l := fun e => h (by simp [e])
-    simp [splitLine, hb, ih hl]
-
-theorem toList_extract_tail (b : ByteArray) (i : Nat) : (b.extract i b.size).toList = b.toList.drop i := by
-  rw [toList_extract]
-  apply List.take_of_length_le
-  simp
-
-/-- `splitLine` on a flat buffer is `splitLine` on its list. -/
-theorem splitLineB_eq (l : ByteArray) :
-    (splitLineB l).map (fun p => (p.1, p.2.toList)) = splitLine l.toList := by
-  unfold splitLineB
-  cases h : findByte l sp 0 with
-  | none =>
-    have := findByte_none l sp 0 h
-    simp only [List.drop_zero] at this
-    simp [splitLine_none _ this]
-  | some i =>
-    obtain ⟨pre, rest, h1, h2, h3, h4⟩ := findByte_some l sp 0 i h
-    simp only [List.drop_zero] at h1
-    have hs := splitLine_sealed rest h2
-    rw [← h1] at hs
-    have e1 : (l.extract 0 i).toList = pre := by
-      rw [toList_extract, h1, h3]; simp
-    have e2 : (l.extract (i + 1) l.size).toList = rest := by
-      rw [toList_extract_tail, h4]
-    simp [e1, e2, hs]
-
 /-! ## Verifying -/
 
 theorem verifyFrom_cons (P : Params) (prev : Digest) (l : Bytes) (ls : List Bytes) :
     verifyFrom P prev (l :: ls) =
-      match splitLine l with
+      match P.splitLine l with
       | none => none
       | some (d, body) =>
         if P.link prev body = d then
@@ -126,9 +52,9 @@ theorem verifyB_eq (P : Params) (b : ByteArray) : ∀ (n i : Nat) (prev : Digest
       have hrest : rest = b.toList.drop (j + 1) := h4
       have hih := ih (b.size - (j + 1)) (by omega) (j + 1) 
       rw [hpl, verifyFrom_cons]
-      have hsp := splitLineB_eq (b.extract i j)
+      have hsp := P.splitB_eq (b.extract i j)
       rw [hline] at hsp
-      cases hs : splitLineB (b.extract i j) with
+      cases hs : P.splitB (b.extract i j) with
       | none =>
         rw [hs] at hsp
         simp at hsp

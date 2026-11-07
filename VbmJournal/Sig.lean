@@ -11,43 +11,8 @@ signed index, and on a chain whose head at the signed index is not the signed he
 and the signature) are an **unsigned tail**: reported, accepted. No signature file means an unsigned journal (older), reported. -/
 namespace VbmJournal
 
-/-! ## Decimal numbers -/
-
-/-- A number in decimal. -/
-def natDec (n : Nat) : Bytes :=
-  if n < 10 then [(48 + n).toUInt8] else natDec (n / 10) ++ [(48 + n % 10).toUInt8]
-termination_by n
-decreasing_by omega
-
-/-- A number read from decimal digits (`none` for nothing, or for anything that is not a digit). -/
-def parseDec (b : Bytes) : Option Nat :=
-  if !b.isEmpty && b.all (fun d => 48 ≤ d.toNat && d.toNat ≤ 57) then
-    some (b.foldl (fun a d => a * 10 + (d.toNat - 48)) 0)
-  else none
-
-/-! ## The signature file -/
-
-/-- What the file says: the number of records signed, the chain head after them, and the mac. -/
-structure Sig where
-  index : Nat
-  head : Digest
-  mac : Bytes
-  deriving DecidableEq, Repr
-
 /-- The text the key's mac is taken of: `index:head`. -/
 def macInput (index : Nat) (head : Digest) : Bytes := natDec index ++ 58 :: head
-
-/-- The file: `index`, a space, `head`, a space, `mac`. -/
-def Sig.toBytes (s : Sig) : Bytes := natDec s.index ++ sp :: (s.head ++ sp :: s.mac)
-
-/-- Read the file back (`none` when it does not have the three fields). -/
-def Sig.ofBytes (t : Bytes) : Option Sig :=
-  match splitLine t with
-  | none => none
-  | some (i, rest) =>
-    match parseDec i, splitLine rest with
-    | some n, some (h, m) => some ⟨n, h, m⟩
-    | _, _ => none
 
 /-! ## Verification -/
 
@@ -69,7 +34,7 @@ entries. Fails closed. -/
 def verdict (P : Params) (mac : Nat → Digest → Bytes) (es : List Entry) : Option Bytes → Except String Verdict
   | none => .ok .unsigned
   | some text =>
-    match Sig.ofBytes text with
+    match P.sigDec text with
     | none => .error unreadableMsg
     | some s =>
       if mac s.index s.head ≠ s.mac then .error macMsg

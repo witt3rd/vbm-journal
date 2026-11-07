@@ -55,9 +55,15 @@ def Params.real : Params where
   link p b := hexOf (sha256L (chainInput p b))
   enc := encUnary
   dec := decUnary
+  frameLine d b := d ++ sp :: b
+  splitLine := splitSp
+  sigEnc := Sig.toBytes
+  sigDec := Sig.ofBytes
   linkB p b := hexOf (sha256 (chainInputB p b)).toList
   decB b := decUnary b.toList
+  splitB := splitSpB
   linkB_eq p b := by simp only [chainInputB_eq, sha256L]
   decB_eq _ := rfl
+  splitB_eq := splitSpB_eq
 
 end VbmJournal

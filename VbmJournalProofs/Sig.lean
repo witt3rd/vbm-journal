@@ -4,7 +4,7 @@ import VbmJournalProofs.Chain
 `VbmJournal.verdict` is the verification of a journal against its signature file (`VbmJournal.Sig`), as lung's `LungSpec.JournalSig.verdict` is.
 **Plain statements.**
 
-* `sig_roundtrip`: what is signed is read back (the file `Sig.toBytes s` reads as `s`, when the head has no separator in it).
+* `sig_roundtrip`: what is signed is read back (the plain-text file `Sig.toBytes s` reads as `s`, when the head has no separator in it); for any format it is the law `Params.Lawful.sig_round`.
 * `verdict_none`: no signature file, no signature: the journal is reported unsigned (an older journal).
 * `verdict_signed`, `verdict_sound`: a journal is accepted as signed **only if** the file reads, the mac is the key's, the journal has at least the
   signed number of records, and the chain's head at that number is the signed head. The records after it are the unsigned tail (a crash between an
@@ -76,19 +76,11 @@ theorem sp_not_natDec (n : Nat) : sp ∉ natDec n := by
 
 /-! ## The file -/
 
-theorem splitLine_cons_sp (a r : Bytes) (h : sp ∉ a) : splitLine (a ++ sp :: r) = some (a, r) := by
-  induction a with
-  | nil => simp [splitLine]
-  | cons b a ih =>
-    have hb : b ≠ sp := fun e => h (by simp [e])
-    have ha : sp ∉ a := fun e => h (by simp [e])
-    simp [splitLine, hb, ih ha]
-
 /-- **What is signed is read back.** -/
 theorem sig_roundtrip (s : Sig) (h : sp ∉ s.head) : Sig.ofBytes s.toBytes = some s := by
   obtain ⟨i, hd, m⟩ := s
   simp only at h
-  simp [Sig.toBytes, Sig.ofBytes, splitLine_cons_sp _ _ (sp_not_natDec i), splitLine_cons_sp _ _ h, parseDec_natDec]
+  simp [Sig.toBytes, Sig.ofBytes, splitSp_sealed _ (sp_not_natDec i), splitSp_sealed _ h, parseDec_natDec]
 
 /-! ## The verdict -/
 
@@ -96,24 +88,24 @@ variable {P : Params} {mac : Nat → Digest → Bytes} {es : List Entry}
 
 theorem verdict_none : verdict P mac es none = .ok .unsigned := rfl
 
-theorem verdict_unreadable {t : Bytes} (h : Sig.ofBytes t = none) : verdict P mac es (some t) = .error unreadableMsg := by
+theorem verdict_unreadable {t : Bytes} (h : P.sigDec t = none) : verdict P mac es (some t) = .error unreadableMsg := by
   simp [verdict, h]
 
-theorem verdict_bad_mac {t : Bytes} {s : Sig} (hp : Sig.ofBytes t = some s) (hm : mac s.index s.head ≠ s.mac) :
+theorem verdict_bad_mac {t : Bytes} {s : Sig} (hp : P.sigDec t = some s) (hm : mac s.index s.head ≠ s.mac) :
     verdict P mac es (some t) = .error macMsg := by
   simp [verdict, hp, hm]
 
-theorem verdict_cut_back {t : Bytes} {s : Sig} (hp : Sig.ofBytes t = some s) (hm : mac s.index s.head = s.mac) (hc : es.length < s.index) :
+theorem verdict_cut_back {t : Bytes} {s : Sig} (hp : P.sigDec t = some s) (hm : mac s.index s.head = s.mac) (hc : es.length < s.index) :
     verdict P mac es (some t) = .error (cutMsg es.length s.index) := by
   simp [verdict, hp, hm, hc]
 
-theorem verdict_rewritten {t : Bytes} {s : Sig} (hp : Sig.ofBytes t = some s) (hm : mac s.index s.head = s.mac) (hc : s.index ≤ es.length)
+theorem verdict_rewritten {t : Bytes} {s : Sig} (hp : P.sigDec t = some s) (hm : mac s.index s.head = s.mac) (hc : s.index ≤ es.length)
     (hr : headFrom P P.genesis (es.take s.index) ≠ s.head) : verdict P mac es (some t) = .error (rewrittenMsg s.index) := by
   have : ¬ es.length < s.index := by omega
   simp [verdict, hp, hm, this, hr]
 
 /-- **A valid signature is accepted, and the records after it are the unsigned tail.** -/
-theorem verdict_signed {t : Bytes} {s : Sig} (hp : Sig.ofBytes t = some s) (hm : mac s.index s.head = s.mac) (hc : s.index ≤ es.length)
+theorem verdict_signed {t : Bytes} {s : Sig} (hp : P.sigDec t = some s) (hm : mac s.index s.head = s.mac) (hc : s.index ≤ es.length)
     (hr : headFrom P P.genesis (es.take s.index) = s.head) :
     verdict P mac es (some t) = .ok (.signed s.index (es.length - s.index)) := by
   have : ¬ es.length < s.index := by omega
@@ -122,9 +114,9 @@ theorem verdict_signed {t : Bytes} {s : Sig} (hp : Sig.ofBytes t = some s) (hm :
 /-- **Fail closed: a journal is accepted as signed only if the file reads, the mac is the key's, the journal was not cut back and the chain's head
 at the signed index is the signed head.** -/
 theorem verdict_sound {t : Bytes} {i k : Nat} (hv : verdict P mac es (some t) = .ok (.signed i k)) :
-    ∃ s, Sig.ofBytes t = some s ∧ mac s.index s.head = s.mac ∧ s.index ≤ es.length ∧
+    ∃ s, P.sigDec t = some s ∧ mac s.index s.head = s.mac ∧ s.index ≤ es.length ∧
       headFrom P P.genesis (es.take s.index) = s.head ∧ i = s.index ∧ k = es.length - s.index := by
-  cases hp : Sig.ofBytes t with
+  cases hp : P.sigDec t with
   | none => simp [verdict, hp] at hv
   | some s =>
     refine ⟨s, rfl, ?_⟩
@@ -147,7 +139,7 @@ theorem verdict_unsigned_only {o : Option Bytes} (hv : verdict P mac es o = .ok 
   cases o with
   | none => rfl
   | some t =>
-    cases hp : Sig.ofBytes t with
+    cases hp : P.sigDec t with
     | none => simp [verdict, hp] at hv
     | some s =>
       simp only [verdict, hp] at hv
@@ -157,23 +149,25 @@ theorem verdict_unsigned_only {o : Option Bytes} (hv : verdict P mac es o = .ok 
         · simp at hv
         · split at hv <;> simp at hv
 
-/-- **A signature that the writer made of a prefix of the journal is accepted**, whatever happened to the journal after it (appends, a torn tail,
-recovery): the records after it are the unsigned tail. -/
-theorem verdict_honest {i : Nat} (hi : i ≤ es.length) (hsp : sp ∉ headFrom P P.genesis (es.take i)) :
-    verdict P mac es (some (Sig.make mac i (headFrom P P.genesis (es.take i))).toBytes) = .ok (.signed i (es.length - i)) := by
-  have hr := sig_roundtrip (Sig.make mac i (headFrom P P.genesis (es.take i))) hsp
-  exact verdict_signed hr rfl hi rfl
-
-/-- The head of a journal of some records has no separator in it (it is a digest). -/
-theorem headFrom_clean (L : P.Lawful) {es : List Entry} (h : es ≠ []) : sp ∉ headFrom P P.genesis es := by
+/-- The head of a journal of some records is a digest (a link of the chain). -/
+theorem headFrom_link {es : List Entry} (h : es ≠ []) : ∃ p b, headFrom P P.genesis es = P.link p b := by
   rcases List.eq_nil_or_concat es with rfl | ⟨l, b, rfl⟩
   · exact absurd rfl h
   · rw [List.concat_eq_append, headFrom_snoc]
-    exact (L.link_clean _ _).2
+    exact ⟨_, _, rfl⟩
+
+/-- **A signature that the writer made of a prefix of the journal is accepted**, whatever happened to the journal after it (appends, a torn tail,
+recovery): the records after it are the unsigned tail. -/
+theorem verdict_honest (L : P.Lawful) {i : Nat} (hi : i ≤ es.length) (hne : es.take i ≠ []) :
+    verdict P mac es (some (P.sigEnc (Sig.make mac i (headFrom P P.genesis (es.take i))))) = .ok (.signed i (es.length - i)) := by
+  obtain ⟨p, b, hh⟩ := headFrom_link (P := P) hne
+  have hr : P.sigDec (P.sigEnc (Sig.make mac i (headFrom P P.genesis (es.take i)))) = some (Sig.make mac i (headFrom P P.genesis (es.take i))) := by
+    rw [hh]; exact L.sig_round i p b _
+  exact verdict_signed hr rfl hi rfl
 
 /-- **An accepted signature anchors the journal** at the signed point (slice 1's `Anchored`). -/
 theorem verdict_anchored {b : Bytes} {r : Read} (hr : read P b = some r) {t : Bytes} {i k : Nat}
-    (hv : verdict P mac r.entries (some t) = .ok (.signed i k)) (s : Sig) (hs : Sig.ofBytes t = some s) :
+    (hv : verdict P mac r.entries (some t) = .ok (.signed i k)) (s : Sig) (hs : P.sigDec t = some s) :
     Anchored P i s.head b := by
   obtain ⟨s', hs', _, hle, hh, hi, _⟩ := verdict_sound hv
   rw [hs] at hs'

@@ -1,4 +1,6 @@
 import VbmJournal.Bytes
+import VbmJournal.Format
+import VbmJournal.Scan
 /-! # vbm-journal slice 1, part 1: records, lines and the digest chain
 
 The pure model of lung's journal (`impl/Lung/Jnl.lean`, `impl/Lung/JournalIO.lean`, `substrate/journal.c`). `Init` only: this
@@ -14,56 +16,86 @@ slice 2) and the entry codec (`enc` and `dec`; JSON in lung). What the proofs ne
 `VbmJournalProofs.Laws`, not assumed here. -/
 namespace VbmJournal
 
-/-- Bytes on disk. -/
-abbrev Bytes := List UInt8
+/-- Is this a well-formed host record: a JSON object that begins with a key (`{"`), has no newline (it is one line) and does not begin with the key `vbm`
+(which the library's own entries use in the JSON-lines format, `VbmJournal.Json`)? -/
+def bodyWf (l : Bytes) : Bool :=
+  l.take 2 == [123, 34] && l.take 6 != [123, 34, 118, 98, 109, 34] && !l.contains nl
 
-/-- A chain digest, as the bytes written in the line (lower-case hex in lung). -/
-abbrev Digest := Bytes
+/-- A record that belongs to the host (the journal's user): the bytes of its line, opaque to the library. A host maps its own records onto `Entry.body`
+(its JSON text) and back; the library chains, verifies, recovers and signs them as it does the others. The bytes are a flat buffer: a journal of
+megabytes holds its records without a list cell per byte. -/
+structure Body where
+  bytes : ByteArray
+  wf : bodyWf bytes.toList = true
 
-/-- What a journal records. `call` is a request sent and not yet answered (lung's `Action.run`), `done` its completion
-(`Action.complete`; `interrupted` is the recovery's verdict), `note` every other record (`inject`, `cancel`, `restart`,
-`put`, and the machine's input events: a handle on the content). -/
+instance : DecidableEq Body := fun a b =>
+  if h : a.bytes.toList = b.bytes.toList then
+    isTrue (by
+      obtain ⟨a1, a2⟩ := a
+      obtain ⟨b1, b2⟩ := b
+      have : a1 = b1 := by rw [← toByteArray_toList a1, ← toByteArray_toList b1]; exact congrArg List.toByteArray h
+      subst this
+      rfl)
+  else isFalse (fun e => h (by subst e; rfl))
+
+instance : Repr Body := ⟨fun b _ => repr b.bytes.toList⟩
+
+/-- What a journal records. `call` is a request sent and not yet answered, `done` its completion (`interrupted` is the recovery's verdict), `note` a record
+with a number (a handle on content kept elsewhere), `body` a record of the host's own (its text, `Body`). Only `call` and `done` mean anything to
+recovery: a journal without them has nothing in flight and recovery adds nothing to it. -/
 inductive Entry where
   | note (n : Nat)
   | call (id : Nat)
   | done (id : Nat) (interrupted : Bool)
+  | body (b : Body)
   deriving DecidableEq, Repr
 
-/-- The two parameters: the digest chain and the entry codec, and their flat-buffer forms.
+/-- The parameters: the digest chain, the entry codec, the line and the signature file, and their flat-buffer forms.
 
-`linkB` and `decB` are `link` and `dec` on a `ByteArray` body: what the compiled reader calls on the bytes of a journal of megabytes, so that it never
-makes a list cell per byte (the proofs keep the list shape; `linkB_eq` and `decB_eq` are the refinement). `Params.ofLists` makes them from `link` and
-`dec` by conversion; a codec that can do better supplies its own with the proof. -/
+The model leaves all of these open, because it must not choose them: the digest (`link`: SHA-256), the codec of an entry (`enc`, `dec`), how a digest and a body make
+a line (`frameLine`) and how a line is cut back into them (`splitLine`), and how the signature is written (`sigEnc`, `sigDec`). What the proofs need of each is
+stated as laws, `Params.Lawful` (`VbmJournalProofs.Laws`), and proved for each concrete choice.
+
+`linkB`, `decB` and `splitB` are `link`, `dec` and `splitLine` on a `ByteArray`: what the compiled reader calls on the bytes of a journal of megabytes, so that it never
+makes a list cell per byte (the proofs keep the list shape; `linkB_eq`, `decB_eq` and `splitB_eq` are the refinement). `Params.ofLists` makes them by conversion; a format
+that can do better supplies its own with the proofs. -/
 structure Params where
   genesis : Digest
   link : Digest → Bytes → Digest
   enc : Entry → Bytes
   dec : Bytes → Option Entry
+  frameLine : Digest → Bytes → Bytes
+  splitLine : Bytes → Option (Digest × Bytes)
+  sigEnc : Sig → Bytes
+  sigDec : Bytes → Option Sig
   linkB : Digest → ByteArray → Digest
   decB : ByteArray → Option Entry
+  splitB : ByteArray → Option (Digest × ByteArray)
   linkB_eq : ∀ p b, linkB p b = link p b.toList
   decB_eq : ∀ b, decB b = dec b.toList
+  splitB_eq : ∀ l, (splitB l).map (fun q => (q.1, q.2.toList)) = splitLine l.toList
 
-/-- Parameters from the list-shaped digest and codec, the flat forms by conversion. -/
+/-- Parameters from the list-shaped digest and codec, with the plain-text line (`digest ' ' body`) and signature file (`index head mac`) of slices 1 and 2;
+the flat forms of the digest and the codec by conversion. -/
 def Params.ofLists (genesis : Digest) (link : Digest → Bytes → Digest) (enc : Entry → Bytes) (dec : Bytes → Option Entry) : Params where
   genesis := genesis
   link := link
   enc := enc
   dec := dec
+  frameLine d b := d ++ sp :: b
+  splitLine := splitSp
+  sigEnc := Sig.toBytes
+  sigDec := Sig.ofBytes
   linkB p b := link p b.toList
   decB b := dec b.toList
+  splitB := splitSpB
   linkB_eq _ _ := rfl
   decB_eq _ := rfl
-
-/-- The newline byte that ends a line. -/
-def nl : UInt8 := 10
-
-/-- The byte between a line's digest and its body. -/
-def sp : UInt8 := 32
+  splitB_eq := splitSpB_eq
 
 /-- The line of an entry after the digest `prev` (without its newline). -/
 def lineOf (P : Params) (prev : Digest) (e : Entry) : Bytes :=
-  P.link prev (P.enc e) ++ sp :: P.enc e
+  P.frameLine (P.link prev (P.enc e)) (P.enc e)
 
 /-- A line as written: the line and its newline. -/
 def frame (l : Bytes) : Bytes := l ++ [nl]
@@ -95,19 +127,12 @@ def parseLines : Bytes → List Bytes × Bytes
       | ([], t) => ([], b :: t)
       | (l :: ls, t) => ((b :: l) :: ls, t)
 
-/-- Cut a line into its digest and its body at the first separator. -/
-def splitLine : Bytes → Option (Digest × Bytes)
-  | [] => none
-  | b :: rest =>
-    if b = sp then some ([], rest)
-    else (splitLine rest).map fun p => (b :: p.1, p.2)
-
 /-- Verify lines from the digest `prev`: each line's digest is `link` of the previous digest and its body, and its body decodes.
 Returns the entries and the head, or `none` on the first line that fails (fail closed). -/
 def verifyFrom (P : Params) : Digest → List Bytes → Option (List Entry × Digest)
   | prev, [] => some ([], prev)
   | prev, l :: ls =>
-    match splitLine l with
+    match P.splitLine l with
     | none => none
     | some (d, body) =>
       if P.link prev body = d then
@@ -133,25 +158,6 @@ def read (P : Params) (bytes : Bytes) : Option Read :=
 The compiled reader works on the file's `ByteArray` (a flat buffer: one byte per byte), by index, in a loop: it never makes a list of the file's bytes and
 never recurses once per line. `readB` is the same function as `read` on the bytes' list (`VbmJournalProofs.Flat`, `readB_eq`: the refinement). -/
 
-/-- The index of the first byte `x` at or after `i`. -/
-def findByte (b : ByteArray) (x : UInt8) (i : Nat) : Option Nat :=
-  if h : i < b.size then
-    if b[i]'h = x then some i else findByte b x (i + 1)
-  else none
-termination_by b.size - i
-
-theorem findByte_lt (b : ByteArray) (x : UInt8) (i j : Nat) (h : findByte b x i = some j) : i ≤ j ∧ j < b.size := by
-  fun_induction findByte b x i with
-  | case1 i hi hx => simp at h; omega
-  | case2 i hi hx ih => have := ih h; omega
-  | case3 i hi => simp at h
-
-/-- `splitLine` on a flat buffer: the digest (a list: a few dozen bytes) and the body (flat). -/
-def splitLineB (l : ByteArray) : Option (Digest × ByteArray) :=
-  match findByte l sp 0 with
-  | none => none
-  | some i => some ((l.extract 0 i).toList, l.extract (i + 1) l.size)
-
 set_option linter.unusedVariables false in
 /-- `verifyFrom` over the lines of the flat buffer `b` from index `i` on, a loop: the entries so far (last first), the head, and the index where the
 fragment without a newline begins (the torn tail). -/
@@ -159,7 +165,7 @@ def verifyB (P : Params) (b : ByteArray) (i : Nat) (prev : Digest) (acc : List E
   match h : findByte b nl i with
   | none => some (acc, prev, i)
   | some j =>
-    match splitLineB (b.extract i j) with
+    match P.splitB (b.extract i j) with
     | none => none
     | some (d, body) =>
       if P.linkB prev body = d then
@@ -185,6 +191,7 @@ def openStep (o : List Nat) : Entry → List Nat
   | .call id => if id ∈ o then o else o ++ [id]
   | .done id _ => o.filter fun i => i != id
   | .note _ => o
+  | .body _ => o
 
 /-- The calls in flight: made, and not completed. A journal that ends with one means the process died. -/
 def openCalls (es : List Entry) : List Nat := es.foldl openStep []

@@ -25,13 +25,13 @@ variable {P : Params} {mac : Nat → Digest → Bytes}
 @[simp] theorem sim_throw {α : Type} (e : String) (s : Sim) : (throw e : SimM α) s = (Except.error e, s) := rfl
 
 /-- The signature file after `signHead` on the state `st`. -/
-def signSig (mac : Nat → Digest → Bytes) (st : St) (sig : Option Bytes) : Option Bytes :=
+def signSig (P : Params) (mac : Nat → Digest → Bytes) (st : St) (sig : Option Bytes) : Option Bytes :=
   match st.mode with
-  | .ready h c => if c = 0 then sig else some (Sig.make mac c h).toBytes
+  | .ready h c => if c = 0 then sig else some (P.sigEnc (Sig.make mac c h))
   | _ => sig
 
 theorem signHead_sim (mac : Nat → Digest → Bytes) (st : St) (s : Sim) :
-    signHead mac Shims.sim st s = (Except.ok (), { s with sig := signSig mac st s.sig }) := by
+    signHead P mac Shims.sim st s = (Except.ok (), { s with sig := signSig P mac st s.sig }) := by
   obtain ⟨gen, mode⟩ := st
   cases mode <;> simp [signHead, signSig, Shims.sim]
   rename_i h c
@@ -59,7 +59,7 @@ theorem sigGate_sim (bytes : ByteArray) (s : Sim) :
 
 theorem driveSigned_eq (st : St) (ev : Event) (s : Sim) :
     driveSigned P mac Shims.sim st ev s = match driveRaw P Shims.sim (sigGate P mac Shims.sim) st ev s with
-      | (Except.ok st', s') => (Except.ok (st', none), { s' with sig := if st' ≠ st then signSig mac st' s'.sig else s'.sig })
+      | (Except.ok st', s') => (Except.ok (st', none), { s' with sig := if st' ≠ st then signSig P mac st' s'.sig else s'.sig })
       | (Except.error e, s') => (Except.ok ((step P st .crash).1, some e), s') := by
   simp only [driveSigned, guarded, sim_tryCatch, sim_bind, sim_pure]
   rcases driveRaw P Shims.sim (sigGate P mac Shims.sim) st ev s with ⟨r, s'⟩
@@ -73,12 +73,12 @@ theorem driveSigned_planned (st ev : _) (st1 : St) (plan : List Effect) (hst : s
     (fs : Fs) (sig : Option Bytes) (cut : Option Cut) :
     driveSigned P mac Shims.sim st ev ⟨fs, sig, cut, 0⟩ =
       match cut with
-      | none => (Except.ok (ack P st1, none), ⟨fs.runAll plan, if ack P st1 ≠ st then signSig mac (ack P st1) sig else sig, none, plan.length⟩)
+      | none => (Except.ok (ack P st1, none), ⟨fs.runAll plan, if ack P st1 ≠ st then signSig P mac (ack P st1) sig else sig, none, plan.length⟩)
       | some c =>
         if c.n < plan.length then
           (Except.ok ((step P st .crash).1, some "cut"), ⟨(fs.runPrefix c.n plan).crash c.keep c.vanish, sig, some c, c.n⟩)
         else
-          (Except.ok (ack P st1, none), ⟨fs.runAll plan, if ack P st1 ≠ st then signSig mac (ack P st1) sig else sig, some c, plan.length⟩) := by
+          (Except.ok (ack P st1, none), ⟨fs.runAll plan, if ack P st1 ≠ st then signSig P mac (ack P st1) sig else sig, some c, plan.length⟩) := by
   rw [driveSigned_eq]
   cases cut with
   | none =>
@@ -98,11 +98,11 @@ theorem driveSigned_recover (st : St) (hm : st.mode = .opened) (fs : Fs) (sig : 
         | some e => (Except.ok ((step P st .crash).1, some e), ⟨fs, sig, cut, 0⟩)
         | none =>
           match cut with
-          | none => (Except.ok (ack P m2, none), ⟨fs.runAll plan, signSig mac (ack P m2) sig, none, plan.length⟩)
+          | none => (Except.ok (ack P m2, none), ⟨fs.runAll plan, signSig P mac (ack P m2) sig, none, plan.length⟩)
           | some c =>
             if c.n < plan.length then
               (Except.ok ((step P st .crash).1, some "cut"), ⟨(fs.runPrefix c.n plan).crash c.keep c.vanish, sig, some c, c.n⟩)
-            else (Except.ok (ack P m2, none), ⟨fs.runAll plan, signSig mac (ack P m2) sig, some c, plan.length⟩) := by
+            else (Except.ok (ack P m2, none), ⟨fs.runAll plan, signSig P mac (ack P m2) sig, some c, plan.length⟩) := by
   obtain ⟨gen, mode⟩ := st
   simp only at hm
   subst hm
@@ -140,7 +140,7 @@ theorem driveSigned_recover (st : St) (hm : st.mode = .opened) (fs : Fs) (sig : 
 theorem signed_append_ok (st : St) {h : Digest} {c : Nat} (hm : st.mode = .ready h c) (e : Entry) (fs : Fs) (sig : Option Bytes) :
     driveSigned P mac Shims.sim st (.append st.gen e) ⟨fs, sig, none, 0⟩ =
       (Except.ok (⟨st.gen, .ready (P.link h (P.enc e)) (c + 1)⟩, none),
-        ⟨fs.runAll (commitPlan none (encodeFrom P h [e]) (c == 0)), some (Sig.make mac (c + 1) (P.link h (P.enc e))).toBytes, none,
+        ⟨fs.runAll (commitPlan none (encodeFrom P h [e]) (c == 0)), some (P.sigEnc (Sig.make mac (c + 1) (P.link h (P.enc e)))), none,
           (commitPlan none (encodeFrom P h [e]) (c == 0)).length⟩) := by
   have hst : step P st (.append st.gen e) =
       (⟨st.gen, .busy (P.link h (P.enc e)) (c + 1)⟩, commitPlan none (encodeFrom P h [e]) (c == 0)) := by
@@ -158,7 +158,7 @@ and the signature file holds the signature of its head after its count. -/
 theorem signed_append_verifies (L : P.Lawful) {w : World} (hI : Inv P w) {h : Digest} {c : Nat} (hm : w.m.mode = .ready h c) (e : Entry) :
     ∃ r, read P (w.fs.runAll (commitPlan none (encodeFrom P h [e]) (c == 0))).contents = some r ∧
       r.entries = entriesOf P w.fs.contents ++ [e] ∧
-      verdict P mac r.entries (some (Sig.make mac (c + 1) (P.link h (P.enc e))).toBytes) = .ok (.signed (c + 1) 0) := by
+      verdict P mac r.entries (some (P.sigEnc (Sig.make mac (c + 1) (P.link h (P.enc e))))) = .ok (.signed (c + 1) 0) := by
   have hstep : World.step P w (.append w.m.gen e none) =
       ⟨⟨w.m.gen, .ready (P.link h (P.enc e)) (c + 1)⟩, w.fs.runAll (commitPlan none (encodeFrom P h [e]) (c == 0))⟩ := by
     rw [step_append_ready w hm, finish_none, acked_busy]
@@ -181,9 +181,9 @@ theorem signed_append_verifies (L : P.Lawful) {w : World} (hI : Inv P w) {h : Di
     simp [hent0]
   · have hhd := (read_inv L _ _ hr).2.2
     have hl : r.entries.take (c + 1) = r.entries := List.take_of_length_le (by omega)
-    have hsp : sp ∉ headFrom P P.genesis (r.entries.take (c + 1)) := by
-      rw [hl, ← hhd, hhead]; exact (L.link_clean _ _).2
-    have := verdict_honest (P := P) (mac := mac) (es := r.entries) (i := c + 1) (by omega) hsp
+    have hne : r.entries.take (c + 1) ≠ [] := by
+      rw [hl]; intro h0; rw [h0] at hlen; simp at hlen
+    have := verdict_honest (P := P) (mac := mac) (es := r.entries) L (i := c + 1) (by omega) hne
     rw [hl, ← hhd, hhead] at this
     rw [this]; simp [hlen]
 
@@ -227,7 +227,7 @@ theorem signed_recover_ok (st : St) (hm : st.mode = .opened) (fs : Fs) (sig : Op
     match recoverPlan P ⟨st.gen, .reading⟩ fs.contents with
     | (m2, plan) =>
       driveSigned P mac Shims.sim st (.recover st.gen) ⟨fs, sig, none, 0⟩ =
-        (Except.ok (ack P m2, none), ⟨fs.runAll plan, signSig mac (ack P m2) sig, none, plan.length⟩) := by
+        (Except.ok (ack P m2, none), ⟨fs.runAll plan, signSig P mac (ack P m2) sig, none, plan.length⟩) := by
   have := driveSigned_recover (P := P) (mac := mac) st hm fs sig none
   rcases hr : recoverPlan P ⟨st.gen, .reading⟩ fs.contents with ⟨m2, plan⟩
   rw [hr] at this
@@ -240,7 +240,7 @@ theorem signed_recover_verifies (L : P.Lawful) {w : World} (hI : Inv P w) (hm : 
     (hg : gateMsg P mac sig w.fs.contents = none) :
     ∃ st' s', driveSigned P mac Shims.sim w.m (.recover w.m.gen) ⟨w.fs, sig, none, 0⟩ = (Except.ok (st', none), s') ∧
       ∃ h c, st'.mode = .ready h c ∧
-        (c = 0 ∨ ∃ r, read P s'.fs.contents = some r ∧ s'.sig = some (Sig.make mac c h).toBytes ∧
+        (c = 0 ∨ ∃ r, read P s'.fs.contents = some r ∧ s'.sig = some (P.sigEnc (Sig.make mac c h)) ∧
           verdict P mac r.entries s'.sig = .ok (.signed c 0)) := by
   have hok := signed_recover_ok (P := P) (mac := mac) w.m hm w.fs sig hg
   have hw := step_recover_opened (P := P) w hm none
@@ -266,10 +266,9 @@ theorem signed_recover_verifies (L : P.Lawful) {w : World} (hI : Inv P w) (hm : 
         refine ⟨r, hr', by simp [signSig, hmd, hc], ?_⟩
         have hhd := (read_inv L _ _ hr').2.2
         have hl : r.entries.take c = r.entries := List.take_of_length_le (by omega)
-        have hsp : sp ∉ headFrom P P.genesis (r.entries.take c) := by
-          rw [hl]
-          exact headFrom_clean L (by intro h0; rw [h0] at hlen; simp at hlen; omega)
-        have := verdict_honest (P := P) (mac := mac) (es := r.entries) (i := c) (by omega) hsp
+        have hne : r.entries.take c ≠ [] := by
+          rw [hl]; intro h0; rw [h0] at hlen; simp at hlen; omega
+        have := verdict_honest (P := P) (mac := mac) (es := r.entries) L (i := c) (by omega) hne
         rw [hl, ← hhd, hhead] at this
         simp only [signSig, hmd, hc, ite_false]
         rw [this]; simp [hlen]

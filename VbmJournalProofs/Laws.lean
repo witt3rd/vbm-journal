@@ -22,6 +22,14 @@ structure Params.Lawful (P : Params) : Prop where
   enc_of_dec : ∀ b e, P.dec b = some e → P.enc e = b
   /-- An encoded entry has no newline. -/
   enc_clean : ∀ e, nl ∉ P.enc e
+  /-- **A line has no newline in it** (the line of an entry after a digest: the framing of its digest and its body). -/
+  line_clean : ∀ p e, nl ∉ P.frameLine (P.link p (P.enc e)) (P.enc e)
+  /-- **A line is cut back into its digest and its body.** -/
+  split_line : ∀ p e, P.splitLine (P.frameLine (P.link p (P.enc e)) (P.enc e)) = some (P.link p (P.enc e), P.enc e)
+  /-- **What is cut from a line is what made it**: a line that splits into a digest and a body is the framing of the two (the line is canonical). -/
+  split_inv : ∀ l d b, P.splitLine l = some (d, b) → l = P.frameLine d b
+  /-- **What is signed is read back**: the signature file of a signature of a head (a digest) reads as it. -/
+  sig_round : ∀ i p b m, P.sigDec (P.sigEnc ⟨i, P.link p b, m⟩) = some ⟨i, P.link p b, m⟩
 
 namespace Params.Lawful
 variable {P : Params} (L : P.Lawful)
@@ -44,8 +52,17 @@ private theorem all_replicate {r : Bytes} (h : (r.all fun x => x == 49) = true) 
     simp only [List.length_cons, List.replicate_succ]
     rw [h.1, ← ih h.2]
 
+theorem bodyWf_nl {l : Bytes} (h : bodyWf l = true) : nl ∉ l := by
+  simp only [bodyWf, Bool.and_eq_true, Bool.not_eq_true'] at h
+  intro hm
+  have := h.2
+  simp [hm] at this
+
 theorem decUnary_encUnary (e : Entry) : decUnary (encUnary e) = some e := by
   cases e with
+  | body b =>
+    obtain ⟨bs, hw⟩ := b
+    simp [encUnary, decUnary, hw]
   | note n => simp [encUnary, decUnary]
   | call i => simp [encUnary, decUnary]
   | done i b => cases b <;> simp [encUnary, decUnary]
@@ -69,6 +86,10 @@ theorem encUnary_decUnary (b : Bytes) (e : Entry) (h : decUnary b = some e) : en
     split at h
     · rename_i ha; cases h; simp [encUnary]; exact (all_replicate ha).symm
     · simp at h
+  · rename_i r
+    split at h
+    · rename_i ha; cases h; simp [encUnary]
+    · simp at h
   · simp at h
 
 theorem encUnary_clean (e : Entry) : nl ∉ encUnary e := by
@@ -76,5 +97,11 @@ theorem encUnary_clean (e : Entry) : nl ∉ encUnary e := by
   | note n => simp [encUnary, nl]
   | call i => simp [encUnary, nl]
   | done i b => cases b <;> simp [encUnary, nl]
+  | body b =>
+    have := b.wf
+    have h2 := bodyWf_nl this
+    simp [encUnary, nl]
+    intro h3
+    exact h2 (by simpa [nl] using h3)
 
 end VbmJournal

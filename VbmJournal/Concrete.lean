@@ -1,7 +1,7 @@
 import VbmJournal.World
 /-! # vbm-journal slice 1, part 4: one concrete choice of the two parameters
 
-For the reference examples and the golden file. The codec is unary and canonical (`Codec` laws are proved in
+For the reference examples and the golden file. The codec is unary and canonical (a host record, `body`, is a tag and its bytes) (`Codec` laws are proved in
 `VbmJournalProofs.Laws`). The digest is a **toy**: FNV-1a over `prev ++ "\n" ++ body`, 16 hex digits. It makes the examples
 readable and deterministic; it is not collision resistant and the chain-integrity theorems do not hold for it. They are about any
 digest that binds (`Hash.Binding`); slice 2 supplies SHA-256 as a shim. -/
@@ -19,6 +19,7 @@ def encUnary : Entry → Bytes
   | .call id => 99 :: List.replicate id 49
   | .done id true => 100 :: 105 :: List.replicate id 49
   | .done id false => 100 :: 107 :: List.replicate id 49
+  | .body b => 98 :: b.bytes.toList
 
 /-- The inverse of `encUnary`; `none` on anything else. -/
 def decUnary : Bytes → Option Entry
@@ -26,6 +27,7 @@ def decUnary : Bytes → Option Entry
   | 99 :: r => if r.all (· == 49) then some (.call r.length) else none
   | 100 :: 105 :: r => if r.all (· == 49) then some (.done r.length true) else none
   | 100 :: 107 :: r => if r.all (· == 49) then some (.done r.length false) else none
+  | 98 :: r => if h : bodyWf r = true then some (.body ⟨r.toByteArray, by simpa using h⟩) else none
   | _ => none
 
 /-- A lower-case hex digit. -/

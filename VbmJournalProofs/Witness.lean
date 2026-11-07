@@ -1,4 +1,4 @@
-import VbmJournalProofs.Laws
+import VbmJournalProofs.Space
 /-! # The laws are satisfiable
 
 `Params.Lawful` is a hypothesis of the theorems; here is a `Params` that meets it, so the hypothesis is not empty. The digest is
@@ -112,13 +112,7 @@ private theorem symB_mem (l : Bytes) : ∀ a ∈ symB l, a = 97 ∨ a = 98 := by
     · simp at ha; exact Or.inr ha
     · exact ih a ha
 
-/-- The parameters meet every law: the hypothesis `Params.Lawful` of the theorems is satisfiable. -/
-theorem sym_lawful : Params.sym.Lawful where
-  link_binds p p' b b' h := by
-    simp only [Params.sym, Params.ofLists, symLink, List.cons.injEq, true_and] at h
-    exact symB_inj_delim _ _ _ _ h
-  link_ne_genesis p b h := by simp [Params.sym, Params.ofLists, symLink] at h
-  link_clean p b := by
+theorem sym_link_clean (p b : Bytes) : nl ∉ Params.sym.link p b ∧ sp ∉ Params.sym.link p b := by
     have hall : ∀ a ∈ Params.sym.link p b, a = 99 ∨ a = 97 ∨ a = 98 ∨ a = 100 := by
       intro a ha
       simp only [Params.sym, Params.ofLists, symLink, List.mem_cons, List.mem_append] at ha
@@ -130,8 +124,20 @@ theorem sym_lawful : Params.sym.Lawful where
     constructor
     · intro h; have := hall _ h; simp [nl] at this
     · intro h; have := hall _ h; simp [sp] at this
+
+/-- The parameters meet every law: the hypothesis `Params.Lawful` of the theorems is satisfiable. -/
+theorem sym_lawful : Params.sym.Lawful where
+  link_binds p p' b b' h := by
+    simp only [Params.sym, Params.ofLists, symLink, List.cons.injEq, true_and] at h
+    exact symB_inj_delim _ _ _ _ h
+  link_ne_genesis p b h := by simp [Params.sym, Params.ofLists, symLink] at h
+  link_clean := sym_link_clean
   dec_enc := decUnary_encUnary
   enc_of_dec := encUnary_decUnary
   enc_clean := encUnary_clean
+  line_clean := (space_laws Params.sym (fun _ _ => rfl) rfl rfl rfl sym_link_clean encUnary_clean).1
+  split_line := (space_laws Params.sym (fun _ _ => rfl) rfl rfl rfl sym_link_clean encUnary_clean).2.1
+  split_inv := (space_laws Params.sym (fun _ _ => rfl) rfl rfl rfl sym_link_clean encUnary_clean).2.2.1
+  sig_round := (space_laws Params.sym (fun _ _ => rfl) rfl rfl rfl sym_link_clean encUnary_clean).2.2.2
 
 end VbmJournal

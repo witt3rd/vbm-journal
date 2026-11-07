@@ -1,4 +1,4 @@
-import VbmJournalProofs.Laws
+import VbmJournalProofs.Space
 /-! # The real parameters meet the laws, if SHA-256 is collision resistant
 
 `Params.real` (`VbmJournal.Real`) is the chain the real driver writes: `link p b` is the hex of `sha256` of `chainInput p b`, and the genesis the
@@ -90,5 +90,9 @@ theorem real_lawful (hcr : Sha256.CollisionFree) : Params.real.Lawful where
   dec_enc := decUnary_encUnary
   enc_of_dec := encUnary_decUnary
   enc_clean := encUnary_clean
+  line_clean := (space_laws Params.real (fun _ _ => rfl) rfl rfl rfl (fun _ _ => hexOf_clean _) encUnary_clean).1
+  split_line := (space_laws Params.real (fun _ _ => rfl) rfl rfl rfl (fun _ _ => hexOf_clean _) encUnary_clean).2.1
+  split_inv := (space_laws Params.real (fun _ _ => rfl) rfl rfl rfl (fun _ _ => hexOf_clean _) encUnary_clean).2.2.1
+  sig_round := (space_laws Params.real (fun _ _ => rfl) rfl rfl rfl (fun _ _ => hexOf_clean _) encUnary_clean).2.2.2
 
 end VbmJournal

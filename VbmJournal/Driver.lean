@@ -75,9 +75,9 @@ def drive (P : Params) (sh : Shims m) (st : St) (ev : Event) : m (St × Option S
 /-! ## The signature -/
 
 /-- Sign the head of a ready writer after its `c` records (nothing for a journal of none, or a writer that is not ready). -/
-def signHead (mac : Nat → Digest → Bytes) (sh : Shims m) (st : St) : m Unit :=
+def signHead (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) (st : St) : m Unit :=
   match st.mode with
-  | .ready h c => if c = 0 then pure () else sh.putSig (Sig.make mac c h).toBytes
+  | .ready h c => if c = 0 then pure () else sh.putSig (P.sigEnc (Sig.make mac c h))
   | _ => pure ()
 
 /-- Recovery's check of the journal against its signature, on the bytes it read. A journal that fails verification is the machine's to refuse; a
@@ -94,7 +94,7 @@ def sigGate (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) (bytes 
 def driveSigned (P : Params) (mac : Nat → Digest → Bytes) (sh : Shims m) (st : St) (ev : Event) : m (St × Option String) :=
   guarded P st do
     let st' ← driveRaw P sh (sigGate P mac sh) st ev
-    if st' ≠ st then signHead mac sh st'
+    if st' ≠ st then signHead P mac sh st'
     pure st'
 
 /-- **The reader**: a journal's entries, its head and its signature's verdict, with no writer (fails closed). -/

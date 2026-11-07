@@ -10,6 +10,7 @@ namespace VbmJournal
 theorem openStep_nodup (o : List Nat) (h : o.Nodup) (e : Entry) : (openStep o e).Nodup := by
   cases e with
   | note n => simpa [openStep] using h
+  | body b => simpa [openStep] using h
   | call id =>
     by_cases hm : id ∈ o
     · simpa [openStep, hm] using h

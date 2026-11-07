@@ -9,7 +9,7 @@ import VbmJournalProofs.Laws
 * `verify_only_prefix`: lines that are all lines of a journal verify only if they are a prefix of it. So a journal whose records were
   reordered, duplicated, or deleted from the middle fails verification (`perm_verifies_only_if_same`). Cutting off the tail
   verifies (a chain alone cannot tell a shorter journal from the real one): that is what an anchor is for.
-* `edit_fails`: a record whose body is edited and whose digest is left alone fails verification.
+* `edit_fails`: a record whose body is edited and whose digest is left alone (a line that cuts into the original digest and another body) fails verification.
 * `anchored_unique`: against an anchor (the head after `n` records, which lung signs: slice 2), every journal that verifies has the
   same first `n` entries; a journal cut below `n` records fails it (`anchored_short_fails`).
 
@@ -68,26 +68,18 @@ theorem parseLines_spec : ∀ (d : Bytes) (ls : List Bytes) (t : Bytes), parseLi
         simp only [flat, frame] at hrest ⊢
         simp [hrest, ht1]
 
-theorem splitLine_sealed {d : Digest} (body : Bytes) (h : sp ∉ d) : splitLine (d ++ sp :: body) = some (d, body) := by
-  induction d with
-  | nil => simp [splitLine]
-  | cons b d ih =>
-    have hb : b ≠ sp := fun e => h (by simp [e])
-    have hd : sp ∉ d := fun e => h (by simp [e])
-    simp [splitLine, hb, ih hd]
-
-theorem splitLine_inv : ∀ (l : Bytes) (d body : Bytes), splitLine l = some (d, body) → l = d ++ sp :: body ∧ sp ∉ d := by
+theorem splitSp_inv : ∀ (l : Bytes) (d body : Bytes), splitSp l = some (d, body) → l = d ++ sp :: body ∧ sp ∉ d := by
   intro l
   induction l with
-  | nil => intro d body h; simp [splitLine] at h
+  | nil => intro d body h; simp [splitSp] at h
   | cons b rest ih =>
     intro d body h
     by_cases hb : b = sp
-    · simp [splitLine, hb] at h
+    · simp [splitSp, hb] at h
       obtain ⟨rfl, rfl⟩ := h
       simp [hb]
-    · simp only [splitLine, hb, ite_false] at h
-      cases hr : splitLine rest with
+    · simp only [splitSp, hb, ite_false] at h
+      cases hr : splitSp rest with
       | none => simp [hr] at h
       | some p =>
         obtain ⟨d1, b1⟩ := p
@@ -151,18 +143,13 @@ section Lawful
 variable (L : P.Lawful)
 include L
 
-theorem lineOf_clean (prev : Digest) (e : Entry) : nl ∉ lineOf P prev e := by
-  have h1 := (L.link_clean prev (P.enc e)).1
-  have h2 := L.enc_clean e
-  simp only [lineOf, List.mem_append, List.mem_cons, not_or]
-  exact ⟨h1, Ne.symm nl_ne_sp |>.symm, h2⟩
+theorem lineOf_clean (prev : Digest) (e : Entry) : nl ∉ lineOf P prev e := L.line_clean prev e
 
 theorem splitLine_lineOf (prev : Digest) (e : Entry) :
-    splitLine (lineOf P prev e) = some (P.link prev (P.enc e), P.enc e) :=
-  splitLine_sealed _ (L.link_clean _ _).2
+    P.splitLine (lineOf P prev e) = some (P.link prev (P.enc e), P.enc e) := L.split_line prev e
 
 theorem lineOf_inj {a b : Digest} {e e' : Entry} (h : lineOf P a e' = lineOf P b e) : a = b ∧ e' = e := by
-  have := congrArg splitLine h
+  have := congrArg P.splitLine h
   rw [splitLine_lineOf L, splitLine_lineOf L] at this
   simp only [Option.some.injEq, Prod.mk.injEq] at this
   obtain ⟨h1, h2⟩ := this
@@ -190,7 +177,7 @@ theorem verifyFrom_inv : ∀ (ls : List Bytes) (prev : Digest) (es : List Entry)
   | cons l ls ih =>
     intro prev es h hv
     simp only [verifyFrom] at hv
-    cases hs : splitLine l with
+    cases hs : P.splitLine l with
     | none => simp [hs] at hv
     | some p =>
       obtain ⟨d, body⟩ := p
@@ -209,7 +196,7 @@ theorem verifyFrom_inv : ∀ (ls : List Bytes) (prev : Digest) (es : List Entry)
             obtain ⟨rfl, rfl⟩ := hv
             obtain ⟨ih1, ih2⟩ := ih d es1 h1 hr
             have hb := L.enc_of_dec _ _ hde
-            obtain ⟨hl, _⟩ := splitLine_inv l d body hs
+            have hl := L.split_inv l d body hs
             subst hb
             subst hd
             simp [sealAll, headFrom, lineOf, hl, ih1, ih2]
@@ -396,13 +383,13 @@ theorem verifyFrom_sealAll_append (prev : Digest) (pre : List Entry) (rest : Lis
     rw [ih]
     cases verifyFrom P (headFrom P (P.link prev (P.enc e)) pre) rest <;> simp
 
-/-- **An edited record fails.** A record whose body is changed and whose digest is left alone fails verification
+/-- **An edited record fails.** A line that cuts into the digest of the record it replaces and a body that is not that record's fails verification
 (an edit that also recomputes the digest breaks the next record's digest, or, at the end, changes the head: `edit_changes_head`). -/
-theorem edit_fails (pre post : List Entry) (e : Entry) (b' : Bytes) (hb : b' ≠ P.enc e) :
-    verifyFrom P P.genesis (sealAll P P.genesis pre ++
-      (P.link (headFrom P P.genesis pre) (P.enc e) ++ sp :: b') :: sealAll P (headFrom P P.genesis (pre ++ [e])) post) = none := by
+theorem edit_fails (pre post : List Entry) (e : Entry) (l b' : Bytes)
+    (hl : P.splitLine l = some (P.link (headFrom P P.genesis pre) (P.enc e), b')) (hb : b' ≠ P.enc e) :
+    verifyFrom P P.genesis (sealAll P P.genesis pre ++ l :: sealAll P (headFrom P P.genesis (pre ++ [e])) post) = none := by
   rw [verifyFrom_sealAll_append L]
-  simp only [verifyFrom, splitLine_sealed _ (L.link_clean _ _).2]
+  simp only [verifyFrom, hl]
   have : P.link (headFrom P P.genesis pre) b' ≠ P.link (headFrom P P.genesis pre) (P.enc e) := fun h => hb (L.link_binds _ _ _ _ h).2
   simp [this]
 

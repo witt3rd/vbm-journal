@@ -13,6 +13,7 @@ import VbmJournalProofs.Sig
 import VbmJournalProofs.SigImpl
 import VbmJournalProofs.Real
 import VbmJournalProofs.SigWorld
+import VbmJournalProofs.Space
 import VbmJournalProofs.Witness
 import VbmJournalProofs.Golden
 import VbmJournalProofs.Axioms

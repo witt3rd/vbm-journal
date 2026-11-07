@@ -24,7 +24,7 @@ structure SWorld where
 /-- No signature file; or the signature of a prefix of the journal, whose directory entry is durable. -/
 def SigHonest (P : Params) (mac : Nat → Digest → Bytes) (w : World) (sig : Option Bytes) : Prop :=
   sig = none ∨ ∃ i, 0 < i ∧ w.fs.dirSafe = true ∧ i ≤ (entriesOf P w.fs.contents).length ∧
-    sig = some (Sig.make mac i (headFrom P P.genesis ((entriesOf P w.fs.contents).take i))).toBytes
+    sig = some (P.sigEnc (Sig.make mac i (headFrom P P.genesis ((entriesOf P w.fs.contents).take i))))
 
 section Lawful
 variable (L : P.Lawful)
@@ -68,9 +68,8 @@ theorem honest_gate {w : World} (hI : Inv P w) {sig : Option Bytes} (h : SigHone
   · simp [verdict_none]
   · rw [hent] at hle hsig
     have hlen : (r.entries.take i).length = i := by simp; omega
-    have hsp : sp ∉ headFrom P P.genesis (r.entries.take i) :=
-      headFrom_clean L (by intro h0; rw [h0] at hlen; simp at hlen; omega)
-    rw [hsig, verdict_honest (P := P) (mac := mac) hle hsp]
+    have hne : r.entries.take i ≠ [] := by intro h0; rw [h0] at hlen; simp at hlen; omega
+    rw [hsig, verdict_honest (P := P) (mac := mac) L hle hne]
 
 end Lawful
 
@@ -110,8 +109,8 @@ theorem simpl_run_of (sw : SWorld) (e : Event) (cut : Option Cut) (r : Except St
 
 /-- The signature file after an event whose plan does not read: unchanged if it fails, signed at the head it leaves if it completes. -/
 def planSig (P : Params) (mac : Nat → Digest → Bytes) (st st1 : St) (plan : List Effect) (sig : Option Bytes) : Option Cut → Option Bytes
-  | none => if ack P st1 ≠ st then signSig mac (ack P st1) sig else sig
-  | some c => if c.n < plan.length then sig else if ack P st1 ≠ st then signSig mac (ack P st1) sig else sig
+  | none => if ack P st1 ≠ st then signSig P mac (ack P st1) sig else sig
+  | some c => if c.n < plan.length then sig else if ack P st1 ≠ st then signSig P mac (ack P st1) sig else sig
 
 theorem simpl_planned (sw : SWorld) (ev : Event) (st1 : St) (plan : List Effect) (hst : step P sw.w.m ev = (st1, plan)) (hno : NoRead plan)
     (cut : Option Cut) :
@@ -132,8 +131,8 @@ theorem simpl_planned (sw : SWorld) (ev : Event) (st1 : St) (plan : List Effect)
 
 /-- The signature file after a signed recovery of a journal whose signature holds. -/
 def recSig (P : Params) (mac : Nat → Digest → Bytes) (m2 : St) (plan : List Effect) (sig : Option Bytes) : Option Cut → Option Bytes
-  | none => signSig mac (ack P m2) sig
-  | some c => if c.n < plan.length then sig else signSig mac (ack P m2) sig
+  | none => signSig P mac (ack P m2) sig
+  | some c => if c.n < plan.length then sig else signSig P mac (ack P m2) sig
 
 theorem simpl_recover (sw : SWorld) (hm : sw.w.m.mode = .opened) (hg : gateMsg P mac sw.sig sw.w.fs.contents = none) (cut : Option Cut) :
     match recoverPlan P ⟨sw.w.m.gen, .reading⟩ sw.w.fs.contents with
@@ -162,7 +161,7 @@ include L
 /-- The signature of a ready writer's head is honest for any system whose file is the writer's (contents and directory entry). -/
 theorem honest_of_ready {w0 w' : World} (hI0 : Inv P w0) {h : Digest} {c : Nat} (hm : w0.m.mode = .ready h c) (hc : c ≠ 0)
     (hc1 : w'.fs.contents = w0.fs.contents) (hc2 : w'.fs.dirSafe = w0.fs.dirSafe) :
-    SigHonest P mac w' (some (Sig.make mac c h).toBytes) := by
+    SigHonest P mac w' (some (P.sigEnc (Sig.make mac c h))) := by
   obtain ⟨r, hr, htail, hlen, hdir, hdur, hh⟩ := ready_facts L hI0 hm
   have hent : entriesOf P w'.fs.contents = r.entries := by simp [entriesOf, hc1, hr]
   have hdir' : w0.fs.dirSafe = true := by rcases hdir with hd | hd; exact hd; exact absurd hd hc
@@ -180,7 +179,7 @@ theorem crash_same {f : Fs} (hp : f.pending = []) (hd : f.dirSafe = true) (k : N
 omit L in
 /-- An event whose plan is empty does not touch the signature. -/
 theorem planSig_nil (st st1 : St) (sig : Option Bytes) (cut : Option Cut)
-    (h : ack P st1 ≠ st → signSig mac (ack P st1) sig = sig) : planSig P mac st st1 [] sig cut = sig := by
+    (h : ack P st1 ≠ st → signSig P mac (ack P st1) sig = sig) : planSig P mac st st1 [] sig cut = sig := by
   cases cut with
   | none =>
     by_cases hc : ack P st1 ≠ st
@@ -195,7 +194,7 @@ theorem planSig_nil (st st1 : St) (sig : Option Bytes) (cut : Option Cut)
 theorem honest_finish (w : World) (m1 : St) (plan : List Effect) (hI0 : Inv P (w.finish P m1 plan none)) {h : Digest} {c : Nat}
     (hm0 : (w.finish P m1 plan none).m.mode = .ready h c) (hc : c ≠ 0) (cut : Option Cut)
     (hcut : ∀ cc, cut = some cc → plan.length ≤ cc.n) :
-    SigHonest P mac (w.finish P m1 plan cut) (some (Sig.make mac c h).toBytes) := by
+    SigHonest P mac (w.finish P m1 plan cut) (some (P.sigEnc (Sig.make mac c h))) := by
   cases cut with
   | none => exact honest_of_ready L hI0 hm0 hc rfl rfl
   | some cc =>
@@ -255,8 +254,8 @@ theorem signed_step {w : World} {sig : Option Bytes} (hI : Inv P w) (hs : SigHon
         have hne : (⟨w.m.gen, .ready (P.link h (P.enc e)) (c + 1)⟩ : St) ≠ w.m := fun heq => by
           have := congrArg (fun m : St => m.mode) heq
           simp [hm] at this
-        have hsig : signSig mac (ack P (⟨w.m.gen, .busy (P.link h (P.enc e)) (c + 1)⟩ : St)) sig =
-            some (Sig.make mac (c + 1) (P.link h (P.enc e))).toBytes := by simp [signSig, hack]
+        have hsig : signSig P mac (ack P (⟨w.m.gen, .busy (P.link h (P.enc e)) (c + 1)⟩ : St)) sig =
+            some (P.sigEnc (Sig.make mac (c + 1) (P.link h (P.enc e)))) := by simp [signSig, hack]
         have hw0 : World.step P w (.append w.m.gen e none) =
             World.finish P w ⟨w.m.gen, .busy (P.link h (P.enc e)) (c + 1)⟩ (commitPlan none (encodeFrom P h [e]) (c == 0)) none := by
           rw [step_append_ready w hm]
@@ -316,11 +315,11 @@ theorem signed_step {w : World} {sig : Option Bytes} (hI : Inv P w) (hs : SigHon
           | ready hh c =>
             rw [hmd] at hm0
             by_cases hc : c = 0
-            · have hsig : signSig mac (ack P m2) sig = sig := by simp [signSig, hmd, hc]
+            · have hsig : signSig P mac (ack P m2) sig = sig := by simp [signSig, hmd, hc]
               cases cut with
               | none => simp only [recSig, hsig]; exact hmono
               | some cc => simp only [recSig, hsig, ite_self]; exact hmono
-            · have hsig : signSig mac (ack P m2) sig = some (Sig.make mac c hh).toBytes := by simp [signSig, hmd, hc]
+            · have hsig : signSig P mac (ack P m2) sig = some (P.sigEnc (Sig.make mac c hh)) := by simp [signSig, hmd, hc]
               cases cut with
               | none =>
                 simp only [recSig, hsig]
@@ -337,7 +336,7 @@ theorem signed_step {w : World} {sig : Option Bytes} (hI : Inv P w) (hs : SigHon
           obtain ⟨_, hbk⟩ := recoverPlan_notBusy (P := P) ⟨w.m.gen, .reading⟩ w.fs.contents (by rw [hr]; exact hbz)
           rw [hr] at hbk
           simp only at hbk
-          have hsig : signSig mac (ack P m2) sig = sig := by simp [signSig, hack, hbk]
+          have hsig : signSig P mac (ack P m2) sig = sig := by simp [signSig, hack, hbk]
           cases cut with
           | none => simp only [recSig, hsig]; exact hmono
           | some cc => simp only [recSig, hsig, ite_self]; exact hmono
