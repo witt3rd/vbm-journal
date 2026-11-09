@@ -31,9 +31,9 @@ There is exactly one way: `.land/land-direct` (a stub for the vendored `.land/to
 
 A removed or changed line in a gate-defining file that may only gain lines (exit 12, "may only GAIN lines") lands only through a gate-edit approval (`scripts/gate-edit-approvals.txt` on main; `.land/tool/bin/land-direct --print-gate-diff-hash FILE` prints the hash). The order is fixed: (1) the approval record lands ALONE: one line, no other file, its own commit and landing; (2) **announce the approval commit to the independent judge BEFORE the edit commit, always, with the diff hash and the FULL edit diff** (`land-direct` prints `APPROVAL COMMIT: announce to the judge before landing the edit`); (3) the edit lands later and removes the record in the same landing. An agent with landing rights could write its own approval line: the control is that the judge reads the record before the edit lands. Never put the approval and the edit in one commit or one landing (refused), never reuse or quietly delete an approval.
 
-## A protected path (when the repository sets `LAND_PROTECTED_LIST`)
+## A protected path (when the repository sets `LAND_PROTECTED`)
 
-A landing that touches a path of the protected-paths list is refused (exit 12, "touches the protected set") unless a one-time approval for exactly that set of paths and exactly that diff is on main. A resume or go-ahead message is not an approval: only the line on main is. The same order as above: `land-direct --print-gate-diff-hash @protected` prints the record (set, hash); the record lands ALONE, announced to the judge first; the change lands later and removes the record in the same landing. Never write the line for a change you are about to land yourself without the judge having read it.
+A landing that touches a pattern of `LAND_PROTECTED` is allowed: the lander names it (`protected set: TOUCHED (...)`), and every gate must still pass (the `post-rebase` hook is where a repository judges it).
 
 ## What red means
 

@@ -9,7 +9,7 @@
 #   land-direct --status | --version
 #
 # What it does (NO LOCK: any number of landers run at once, each in its own run directory; the remote's refusal of a push that is not a fast-forward is the only arbiter):
-#   hold? -> fetch -> land-time checks on every commit (Conventional subject, required trailers, size budget) -> hold? -> frozen? (a person's freeze: only a fix or a true revert lands; a RED main does not
+#   hold? -> fetch -> land-time checks on every commit (Conventional subject, required trailers) -> hold? -> frozen? (a person's freeze: only a fix or a revert lands, recognised by its subject; a RED main does not
 #   stop landing: whoever sees it reverts the commit that made it red with git revert; nothing runs after the push, no CI is read) -> rebase the commits onto <remote>/<base> in this run's own scratch
 #   worktree (<git common dir>/vbm-land/run.<pid>.<random>/wt, removed at exit; a conflict ONLY in generated files takes base's file and regenerates) -> hooks -> Tier 1 (the gates command, then the test
 #   command) on that exact combination -> fetch again: base moved during Tier 1 = rebase and check again (up to LAND_ATTEMPTS attempts within LAND_DEADLINE seconds, then exit 16) -> `git push <remote> <sha>:<base>`, a
@@ -30,13 +30,12 @@
 # BOUNDED: every step runs under `timeout --kill-after=30`: LAND_TIER1_TIMEOUT (Tier 1, regeneration of generated files by Tier 1 is part of it), LAND_STEP_TIMEOUT
 #   (hooks, regeneration), LAND_GIT_TIMEOUT (fetch, push). A step that runs over is killed with one plain line and the run stops as that step's failure.
 # Operator environment (not policy): REMOTE-independent knobs LAND_CONF, LAND_FIX_FOR_RED=1 (treat this change as a fix, so it passes a freeze), LAND_DIRECT_LOG, and the
-#   timeouts above. Policy keys are never read from the environment. LAND_LOCK_WAIT_SECONDS, LAND_LEASE_STALE_SECONDS and the key LAND_LOCK_WAIT are read and IGNORED (one notice): there is no lock.
+#   timeouts above. Policy keys are never read from the environment.
 # Commands the lander runs get: LAND_TOP (the worktree landed from), LAND_BASE_REF (<remote>/<base>), LAND_STATE_DIR (shared by every run of the clone: hold, freeze, metrics), LAND_RUN_DIR (this run's own: scratch worktree, hooks, logs), LAND_ATTEMPT (1, 2, ...) and LAND_PREV_BASE (the base commit the last attempt validated against; empty on the first), LAND_TASK (the tip's first required trailer value).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); lib=$here/../lib
 . "$lib/conf.sh"; . "$lib/freeze.sh"; . "$lib/paths.sh"
 # operator knobs first, then clear every policy variable so only the repository's file can set policy
-ignored=; for k in LAND_LOCK_WAIT_SECONDS LAND_LEASE_STALE_SECONDS; do [ -z "${!k:-}" ] || ignored="$ignored $k"; done   # the lock is gone: these are read, ignored and named once
 o_t1=${LAND_TIER1_TIMEOUT:-}; o_st=${LAND_STEP_TIMEOUT:-}; o_gt=${LAND_GIT_TIMEOUT:-}; o_conf=${LAND_CONF:-}; o_fixred=${LAND_FIX_FOR_RED:-}
 conf_defaults
 
@@ -142,10 +141,8 @@ if [ "$LAND_REMOTE" != "$remote" ] || [ "$LAND_BASE" != "$base" ]; then   # the 
 fi
 export LC_ALL=$LAND_LOCALE
 lt=${o_t1:-$LAND_TIER1_TIMEOUT}; st=${o_st:-$LAND_STEP_TIMEOUT}; gt=${o_gt:-$LAND_GIT_TIMEOUT}
-for k in LAND_APPROVALS LAND_APPROVAL_DAYS LAND_PROTECTED_LIST LAND_PROTECTED_APPROVALS LAND_GATE_APPEND_ONLY LAND_PROD_PATHS LAND_BUDGET_LINES LAND_LOCK_WAIT LAND_CI_WORKFLOW LAND_TIER1_JOB LAND_RED_MODE LAND_RED_WAIT LAND_KNOWN_FLAKY LAND_FLAKY_RERUN_WAIT LAND_TIER2_JOB; do [ -z "${!k}" ] || ignored="$ignored $k"; done
-[ -z "$ignored" ] || echo "land-direct: note:$ignored ignored: no longer used (there is no lock, landing does not read CI, and approvals, protected lists, the append-only judge and the diff budget are gone: a red main is whoever sees it); remove them" >&2
 export LAND_TOP=$top LAND_BASE_REF=$remote/$base LAND_STATE_DIR=$state
-read -ra prot_globs <<<"$LAND_PROTECTED"; read -ra fix_globs <<<"$LAND_FIX_PATHS"
+read -ra prot_globs <<<"$LAND_PROTECTED"
 
 tip0=$(git -C "$top" rev-parse --verify -q "$rev^{commit}") || badinput "no such revision: $rev"
 commits=$(git -C "$top" rev-list --reverse --topo-order "$remote/$base..$tip0")
@@ -158,23 +155,10 @@ ncommits=$(wc -l <<<"$commits")
 matches_any() { local f=$1 g; shift; for g in "$@"; do [[ "$f" == $g ]] && return 0; done; return 1; }   # shell patterns; * matches /
 types=$(echo $LAND_COMMIT_TYPES | tr ' ' '|')
 conv_re="^(${types})(\\([a-z0-9_,./-]+\\))?!?: ..*|^Revert \".+\""
-fix_subject_re='^(fix\((ci|tests)\):|[Rr]evert)'
-true_revert() {   # a commit that undoes ONE commit of base: its message names it (`This reverts commit <sha>`), that commit is in base, and it touches no file the reverted one did not
-  local c=$1 r f own; r=$(git -C "$top" log -1 --format=%B "$c" | sed -n 's/^This reverts commit \([0-9a-f]\{40\}\).*/\1/p' | sed -n 1p)
-  [ -n "$r" ] && git -C "$top" merge-base --is-ancestor "$r" "$remote/$base" 2>/dev/null || return 1
-  own=$(git -C "$top" show --name-only --format= "$r")
-  for f in $(git -C "$top" diff-tree --no-commit-id --name-only -r "$c"); do grep -qxF -- "$f" <<<"$own" || return 1; done
-  return 0
-}
-commit_is_fix() {   # a fix for a red main: a fix(ci)/fix(tests)/revert subject AND, when LAND_FIX_PATHS is set, only test/CI paths; never the protected set (a true revert may touch anything it undoes)
-  local c=$1 f subj; subj=$(git -C "$top" log -1 --format=%s "$c")
-  [[ "$subj" =~ $fix_subject_re ]] || return 1
-  true_revert "$c" && return 0
-  for f in $(git -C "$top" diff-tree --no-commit-id --name-only -r "$c"); do
-    [ ${#prot_globs[@]} -eq 0 ] || ! matches_any "$f" "${prot_globs[@]}" || return 1
-    [ ${#fix_globs[@]} -eq 0 ] || matches_any "$f" "${fix_globs[@]}" || return 1
-  done
-  return 0
+fix_subject_re='^(fix(\([^)]*\))?:|[Rr]evert)'   # `fix:` or `fix(<any scope>):`, or a revert: the subject alone decides, never the paths it touches
+commit_is_fix() {   # a fix for a frozen base: a `fix:` / `fix(<scope>):` subject, or a subject that starts with Revert/revert (recognised by its subject, never by the paths it touches)
+  local subj; subj=$(git -C "$top" log -1 --format=%s "$1")
+  [[ "$subj" =~ $fix_subject_re ]]
 }
 budget=; allfix=1; step=land-time-checks
 for c in $commits; do
@@ -205,7 +189,7 @@ run_hook() { local n=$1; shift; [ -n "$hooks" ] && [ -x "$hooks/$n" ] || return 
 
 # ---- a freeze (a person's: a named owner and an expiry) stops landing but for a fix or a revert. A RED main does not: whoever sees it reverts the commit that made it red with git revert.
 freezecheck() { freeze_active "$freezef" || return 0
-  [ "$isfix" = 1 ] && echo "land-direct: $base is frozen; this change is a fix or a revert: landing" || stop 14 held "$base is frozen ($(freeze_describe "$freezef")): only a fix or a revert lands"; }
+  [ "$isfix" = 1 ] && echo "land-direct: $base is frozen; this change is a fix or a revert: landing" || stop 14 held "$base is frozen ($(freeze_describe "$freezef")): only a fix or a revert lands (a subject starting fix:, fix(<scope>): or Revert)"; }
 
 holdcheck; freezecheck
 
@@ -259,7 +243,7 @@ while :; do
     rc=0; (cd "$wt" && bounded "$st" "regenerate" bash -c "$LAND_GEN_CMD") >"$run/gen.log" 2>&1 || rc=$?
     [ "$rc" = 0 ] || { tail -3 "$run/gen.log" >&2; stop 13 tier1 "the generated files cannot be regenerated (exit $rc; log: $run/gen.log); not landing."; }
   fi
-  # the protected set, judged on what would land (the rebased tree against base): touching it is allowed; the hooks and Tier 1 must pass, and it never counts as a fix
+  # the protected set, judged on what would land (the rebased tree against base): touching it is allowed; the hooks and Tier 1 must pass
   g diff --name-only "$bsha" > "$run/touched.txt"; export LAND_TOUCHED_FILE=$run/touched.txt; prot_hit=
   if [ ${#prot_globs[@]} -gt 0 ]; then while IFS= read -r f; do matches_any "$f" "${prot_globs[@]}" && prot_hit="$prot_hit $f"; done < "$run/touched.txt"; fi
   export LAND_PROTECTED_TOUCHED=${prot_hit# }

@@ -10,7 +10,7 @@ Markers live in `<git common dir>/vbm-land/`, shared by every worktree of the cl
 
 | | hold | freeze |
 |---|---|---|
-| effect | **no** landing at all (even one in flight, checked right before its push) | only a fix or revert lands |
+| effect | **no** landing at all (even one in flight, checked right before its push) | only a fix or a revert lands, recognised by its commit subject: `fix:`, `fix(<scope>):` with any scope, or a subject starting `Revert`/`revert` |
 | use | a person needs to stop everything now; maintenance; unsure state | main broke and a revert/fix is being prepared |
 | needs | a reason | reason, **owner**, expiry |
 
@@ -21,10 +21,12 @@ Markers live in `<git common dir>/vbm-land/`, shared by every worktree of the cl
 .land/land-direct --hold "why, who, until when"                  # stop landings
 .land/land-direct --release                                      # allow landings again
 .land/land-direct --freeze "why" --owner NAME --for 6h           # only fixes and reverts land
-.land/land-direct --thaw                                         # lift it (it also lifts on expiry or a landed fix)
+.land/land-direct --thaw                                         # lift it (it also lifts on its expiry)
 ```
 
 When `land-direct` exits 14, read the marker's reason (`--status`), and ask its owner. A red main is not a reason to freeze: whoever sees it reverts what made it red with `git revert` (`triage-red`).
+
+A fix passes a freeze on its **subject** alone: `fix:` or `fix(<your scope>):`. The paths it touches are not judged, so name the scope truthfully (`fix(land):`, not a scope chosen to get past the freeze), and do not retitle an ordinary change to land it.
 
 ## Verify
 
@@ -36,3 +38,4 @@ When `land-direct` exits 14, read the marker's reason (`--status`), and ask its 
 - Do not delete marker files by hand; use `--release` / `--thaw`.
 - Do not hold to avoid a red Tier 1 or a conflict; fix those.
 - Do not set a freeze without an owner and an expiry (both are required).
+- Do not land under a freeze with a `fix:` subject unless the change really is the repair.

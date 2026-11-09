@@ -2,6 +2,7 @@
 # no-build-guard [-- CMD...]     refuse (exit 2, nothing started) on a host that carries a no-build marker (/etc/vbm/no-build-host or <config dir>/vbm/no-build-host); with CMD, then exec CMD.
 # no-build-guard --lint [ROOT]   Tier 1 lint (also --selftest, which runs the fixtures only): the repository's scripts/run-scoped.sh calls this guard before it starts anything and really refuses with a marker present;
 #                                a runner declared in scripts/long-runners.txt or scripts/heavy-runners.txt (`NAME`: callers wrap it, `self NAME`: its file calls this guard) is never run outside run-scoped.sh / this guard / run-probe.
+#                                The files it reads are the repository's own (its `scripts/` and githooks, its LAND_ENTRY): nothing under .github/ is read, since nothing runs after the push.
 # There is NO override: VBM_ALLOW_BUILD_HERE and every other variable are ignored. Honest limits, in docs/no-build-host.md (a deleted marker; a marker created after the check; indirection the lint cannot see).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/no-build-host.sh"
@@ -34,7 +35,7 @@ lint() {
       [ -z "$land" ] || case $f in "$land"/*) continue;; esac          # the vendored tool is not the repository's code (LAND_DIR, lib/paths.sh)
       case $f in scripts/run-scoped.sh|scripts/lint-scoped-runners.sh|scripts/check-scoped-runners.sh) continue;; esac
       h=$(runs_bare "$n" < "$f" || true); [ -z "$h" ] || bad="$bad$f: runs $n outside run-scoped.sh: $(echo "$h" | sed -n 1p | cut -c1-100)"$'\n'
-    done < <(git ls-files 'scripts/*.sh' scripts/wt ${entry:+"$entry"} 'scripts/githooks/*' '.github/workflows/*')   # LAND_ENTRY (lib/paths.sh): the entry script an agent runs
+    done < <(git ls-files 'scripts/*.sh' scripts/wt ${entry:+"$entry"} 'scripts/githooks/*')   # LAND_ENTRY (lib/paths.sh): the entry script an agent runs
   done
   [ -z "$bad" ] || { echo "no-build-guard --lint: a long runner can start on a no-build host:" >&2; printf '%s' "$bad" >&2; return 1; }
   echo "no-build-guard --lint: ok"

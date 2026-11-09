@@ -3,11 +3,9 @@
 # land-update <tag|commit> [--root DIR]
 # --check: READ-ONLY. Compares the pin ($LAND_PIN, lib/paths.sh) with the release tags of the source and prints one line:
 #     vbm-land: pinned v0.1.0, latest v0.3.2: behind 4 releases (minor)        |      vbm-land: pinned v0.3.2 is the latest release: up to date
-#   The class is the semver distance of the pin to the latest release: patch, minor or major. Exit 0 up to date | 1 behind (visible, never a gate: run it in a workflow of its own) |
-#   2 not installed | 3 the source cannot be reached (not "up to date": nobody knows). Under GitHub Actions it also writes a warning annotation and a step-summary line when behind.
+#   The class is the semver distance of the pin to the latest release: patch, minor or major. Exit 0 up to date | 1 behind (visible, never a gate) |
+#   2 not installed | 3 the source cannot be reached (not "up to date": nobody knows).
 # land-update --diff <tag> [--root DIR]: verify the release (below) and show what it would change (changed, added and removed vendored files, their diffs, and the CHANGELOG entries newer than the pin); changes nothing.
-# land-update --auto: the scheduled workflow's mode. Reads LAND_AUTO_UPDATE (none | patch | minor; default none) from the repository's land.conf on its base branch. none: reports like --check.
-#   patch / minor: when a release within that class is out, does `--land` to the newest such release; a MAJOR release is never automatic (it is reported). On a red or a refusal it stops and exits non-zero.
 # land-update --land <tag|commit>: the whole update as the repository's own act: verify, stage, commit `chore(land): vbm-land <version>` (with the trailers the repository's land.conf requires), then land it
 #   through the repository's OWN lander and gates (its Tier 1, its hooks, its attack suite), run from a pristine fresh clone of the base branch, so the lander that lands the new copy is the old one already on
 #   main. Needs a clean worktree. It stops on the first red or refusal and lands nothing (the commit stays local for you to look at); it never forces. Exit code: the lander's.
@@ -16,25 +14,17 @@
 set -euo pipefail
 export LC_ALL=C
 here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/source.sh"; . "$here/../lib/paths.sh"   # paths.sh: every consumer path, defined once (LAND_DIR, LAND_ENTRY, ...)
-ref=; root=; check=0; diffonly=0; land=0; auto=0
+ref=; root=; check=0; diffonly=0; land=0
 usage() { echo "usage: land-update --check | --diff <tag> | [--land] <tag|commit>   [--root DIR]" >&2; exit 2; }
-while [ $# -gt 0 ]; do case $1 in --root) root=${2:?--root needs a directory}; shift;; --check) check=1;; --diff) diffonly=1;; --land) land=1;; --auto) auto=1;; -*) usage;; *) ref=$1;; esac; shift; done
-[ "$check" = 1 ] || [ "$auto" = 1 ] || [ -n "$ref" ] || usage
+while [ $# -gt 0 ]; do case $1 in --root) root=${2:?--root needs a directory}; shift;; --check) check=1;; --diff) diffonly=1;; --land) land=1;; -*) usage;; *) ref=$1;; esac; shift; done
+[ "$check" = 1 ] || [ -n "$ref" ] || usage
 [ -n "$root" ] || root=$(git rev-parse --show-toplevel)
 label=vbm-land; pdir=$LAND_DIR; upd=$LAND_DIR/bin/land-update
 pin=$root/$LAND_PIN
 pinsrc=$(sed -n 's/^source=//p' "$pin" 2>/dev/null | sed -n 1p || true); src=$pinsrc
 [ -n "$src" ] || { echo "land-update: no $LAND_PIN in $root: install first (install --source SRC <ref>)" >&2; exit 2; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/land-update.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
-if [ "$auto" = 1 ]; then   # the policy is the repository's own, read from its base branch (a change cannot grant itself an auto-update)
-  . "$here/../lib/conf.sh"; conf_defaults
-  git -C "$root" fetch -q origin 2>/dev/null || true
-  b=$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD | sed 's#^origin/##' || true); b=${b:-main}
-  if git -C "$root" cat-file -e "origin/$b:$LAND_CONF_FILE" 2>/dev/null; then conf_parse land.conf < <(git -C "$root" show "origin/$b:$LAND_CONF_FILE") || exit 2; fi
-  conf_validate >/dev/null 2>&1 || true
-  if [ "$LAND_AUTO_UPDATE" = none ]; then echo "land-update --auto: LAND_AUTO_UPDATE=none: reporting only"; fi
-fi
-if [ "$check" = 1 ] || [ "$auto" = 1 ]; then
+if [ "$check" = 1 ]; then
   pinned=$(sed -n 's/^version=//p' "$pin" | sed -n 1p); [[ "$pinned" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] || { echo "land-update: the PIN has no usable version= ($pinned)" >&2; exit 2; }
   src_fetch "$src" HEAD "$tmp/src" >/dev/null 2>"$tmp/err" || { echo "$label: cannot reach the source $src to look for releases: $(cat "$tmp/err"): NOT verified up to date" >&2; exit 3; }
   tags=$(git -C "$tmp/src" tag --list 'v[0-9]*.[0-9]*.[0-9]*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | LC_ALL=C sort -V)
@@ -47,21 +37,8 @@ if [ "$check" = 1 ] || [ "$auto" = 1 ]; then
   [ "$behind" -gt 0 ] || { echo "$label: pinned $pinned is the latest release ($latest): up to date"; exit 0; }
   IFS=. read -r pa pb pc <<<"${base#v}"; IFS=. read -r la lb lc <<<"${latest#v}"
   if [ "$la" != "$pa" ]; then class=major; elif [ "$lb" != "$pb" ]; then class=minor; else class=patch; fi
-  line="$label: pinned $pinned, latest $latest: behind $behind release$([ "$behind" = 1 ] || echo s) ($class)"
-  echo "$line"
-  if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::warning title=$label update available::$line. Run the update-vbm-land skill ($upd $latest)."; fi
-  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$line" >> "$GITHUB_STEP_SUMMARY"; fi
-  [ "$auto" = 1 ] && [ "$LAND_AUTO_UPDATE" != none ] || exit 1
-  # the newest release this repository allows itself to take: patch = same major.minor, minor = same major; a MAJOR release is never automatic
-  target=; for t in $tags; do
-    IFS=. read -r ta tb tc <<<"${t#v}"
-    [ "$t" != "$pinned" ] || continue
-    if [ "$t" != "$base" ] && [ "$(printf '%s\n%s\n' "$base" "$t" | LC_ALL=C sort -V | tail -n1)" != "$t" ]; then continue; fi
-    case $LAND_AUTO_UPDATE in patch) [ "$ta.$tb" = "$pa.$pb" ] && target=$t;; minor) [ "$ta" = "$pa" ] && target=$t;; esac
-  done
-  [ -n "$target" ] || { echo "land-update --auto: no release within LAND_AUTO_UPDATE=$LAND_AUTO_UPDATE (a major waits for a person): reporting only"; exit 1; }
-  echo "land-update --auto: updating to $target (LAND_AUTO_UPDATE=$LAND_AUTO_UPDATE), through this repository's own lander"
-  ref=$target; land=1; rm -rf "$tmp/src"
+  echo "$label: pinned $pinned, latest $latest: behind $behind release$([ "$behind" = 1 ] || echo s) ($class)"
+  exit 1
 fi
 c=$(src_fetch "$src" "$ref" "$tmp/src") || exit 1
 sf=$LAND_SIGNERS_FILE

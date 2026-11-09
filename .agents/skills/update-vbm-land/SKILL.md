@@ -32,14 +32,9 @@ A release is an annotated tag signed by the maintainer's ssh key, recording the 
 
 `DRIFT:` lines name the file. Fix by **restoring**, not editing: `.land/tool/bin/land-update <pinned version>` (the version is in `.land/PIN`). A local need becomes a config key or a hook in your own `.land/land.d/`, or a change upstream.
 
-## Editing a gate line in a consumer (the approval)
-
-A removed or changed line in a gate-defining file (`LAND_GATE_APPEND_ONLY`, or what your own judge guards) lands only through a gate-edit approval already on main: a record `FILE | sha256 of the exact diff | reason | date` in `scripts/gate-edit-approvals.txt`, hash from `.land/tool/bin/land-direct --print-gate-diff-hash FILE`. **The approval commit lands alone (one line, no other file) and is announced to the independent judge BEFORE the edit commit, always, with the diff hash and the FULL edit diff**; the edit's landing then removes the record (one-time, 7 days). Honest limit: an agent with landing rights could write its own approval line; the control is that approvals are visible one-commit records the judge reads before the edit lands. A vbm-land update that adds a gate to an existing repository does not need an approval; changing an existing gate line does.
-
 ## Do NOT
 
 - Do not edit `.land/tool/`, `MANIFEST.sha256`, `PIN` or the vendored skills by hand, and never "fix" drift by regenerating the manifest in a consumer.
 - Do not update to an untagged commit unless asked, and do not skip verification (never remove `.land/land.signers` to make an update pass).
 - Do not mix the update with other changes in one commit.
 - Do not take a major release without the owner's decision.
-- Do not land a gate-line edit and its approval together, and do not land the edit before the approval commit has been announced to the judge.

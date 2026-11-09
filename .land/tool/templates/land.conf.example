@@ -12,15 +12,7 @@ LAND_TEST_CMD=true
 # Inherited red: the lines of Tier 1's output that name a failure (a landing may pass a Tier 1 that fails only with failures the bare base also has). The default suits `FAIL ...` / `FAILED ...` lines.
 # LAND_FAIL_PATTERN=^(FAIL|FAILED)([ :]|$)
 
-# Size budget on production paths (a Diff-Budget: trailer waives it), commit rules, the gate-defining set: everything the tool owns in this repository is in .land/, and .land/ is what to protect.
+# Commit rules and the gate-defining set: everything the tool owns in this repository is in .land/, and .land/ is what to protect.
 #LAND_PROTECTED=.land/land.conf .land/land.d/* .land/land-direct
-#LAND_FIX_PATHS=tests/* .github/*
 # A whole folder in one entry, if you want it off limits to agents: LAND_PROTECTED=.land/* (the install --signers FILE copy of land.signers
 # is not a signers-file change; after it, a change to .land/land.signers needs LAND_OWNER=1)
-
-# Gate-edit approvals (docs/gate-edit-approvals.md): files that may only GAIN lines; a removed or changed line needs an exact-diff approval already on main.
-#LAND_GATE_APPEND_ONLY=scripts/tier1.sh scripts/gates/*
-#LAND_APPROVAL_DAYS=7
-# Protected sets: a landing that touches a path of this list (the list, the configuration and the hooks always count) needs a one-time approval for exactly that set of paths already on main.
-#LAND_PROTECTED_LIST=scripts/protected-paths.txt
-#LAND_PROTECTED_APPROVALS=scripts/protected-approvals.txt
