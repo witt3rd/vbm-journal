@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# The per-repository configuration (default scripts/land.conf), read by bin/land-direct. Sourced, never run.
+# The per-repository configuration (default $LAND_CONF_FILE, lib/paths.sh), read by bin/land-direct. Sourced, never run.
 #
 # The file is DATA, not code: one `LAND_KEY=value` per line, `#` starts a comment line, a value may be wrapped in one pair of single or double
 # quotes, nothing is ever expanded or executed while reading it, and an unknown key is an error (a typo must not silently turn a gate off).
 # The values that name commands (LAND_GATES_CMD, LAND_TEST_CMD, ...) are run later, by the lander, with `bash -c` inside the scratch worktree.
 #
 # The keys and their defaults are the stable interface of this tool (README, "Configuration"): conf_defaults sets them, conf_parse reads a file.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/paths.sh"   # every consumer path, defined once (lib/paths.sh)
+
 land_conf_keys="LAND_BASE LAND_REMOTE LAND_CI_WORKFLOW LAND_TIER1_JOB LAND_RED_MODE LAND_RED_WAIT LAND_GATES_CMD LAND_TEST_CMD LAND_REGEN_CMD LAND_GEN_CMD
  LAND_GENERATED_LIST LAND_PROD_PATHS LAND_BUDGET_LINES LAND_REQUIRE_TRAILERS LAND_CONVENTIONAL LAND_COMMIT_TYPES LAND_PROTECTED LAND_FIX_PATHS
  LAND_APPROVALS LAND_APPROVAL_DAYS LAND_PROTECTED_LIST LAND_PROTECTED_APPROVALS LAND_GATE_APPEND_ONLY LAND_KNOWN_FLAKY LAND_FLAKY_RERUN_WAIT LAND_TIER2_JOB LAND_HOOKS_DIR LAND_AUTO_UPDATE LAND_LOCALE LAND_FAIL_PATTERN LAND_ATTEMPTS LAND_DEADLINE LAND_LOCK_WAIT LAND_TIER1_TIMEOUT LAND_STEP_TIMEOUT LAND_GIT_TIMEOUT"
@@ -23,13 +25,13 @@ conf_defaults() {
   LAND_APPROVALS=; LAND_APPROVAL_DAYS=          # LEGACY: approvals are gone (read and ignored)
   LAND_PROTECTED_LIST=; LAND_PROTECTED_APPROVALS=   # LEGACY (read and ignored)
   LAND_GATE_APPEND_ONLY=                        # LEGACY (read and ignored)
-  LAND_HOOKS_DIR=scripts/land.d                 # repository-owned hooks (README, "Hooks")
-  LAND_AUTO_UPDATE=none                          # none | patch | minor: what the scheduled workflow may update by itself (land-update --auto); a major release never
+  LAND_HOOKS_DIR=$LAND_HOOKS_DEFAULT            # repository-owned hooks (README, "Hooks")
+  LAND_AUTO_UPDATE=none                          # none | patch | minor: what land-update --auto may take by itself (nothing schedules it: there is no CI); a major release never
   LAND_LOCALE=C                                 # pinned for collation, glob and sort order
   LAND_TIER1_TIMEOUT=1800; LAND_STEP_TIMEOUT=600; LAND_GIT_TIMEOUT=180   # seconds
   LAND_FAIL_PATTERN='^(FAIL|FAILED)([ :]|$)'      # an extended regular expression: the lines of Tier 1's output that name a failure. A landing may pass a Tier 1 that fails ONLY with failures the bare base already has (inherited red)
   LAND_ATTEMPTS=30; LAND_DEADLINE=900           # a landing re-validates when the base moves under it: at most this many attempts, none started after this many seconds (then exit 16)
-  LAND_LOCK_WAIT=; LAND_CI_WORKFLOW=; LAND_TIER1_JOB=; LAND_RED_MODE=; LAND_RED_WAIT=; LAND_KNOWN_FLAKY=; LAND_FLAKY_RERUN_WAIT=; LAND_TIER2_JOB=   # LEGACY keys: read and ignored (land-direct names those a land.conf still sets, once): there is no lock since 0.5.0, and landing no longer reads CI (a red main is the watchdog's: bin/land-revert). Still known keys, so an old file keeps loading
+  LAND_LOCK_WAIT=; LAND_CI_WORKFLOW=; LAND_TIER1_JOB=; LAND_RED_MODE=; LAND_RED_WAIT=; LAND_KNOWN_FLAKY=; LAND_FLAKY_RERUN_WAIT=; LAND_TIER2_JOB=   # LEGACY keys: read and ignored (land-direct names those a land.conf still sets, once): there is no lock since 0.5.0, and landing no longer reads CI (a red main is whoever sees it: git revert). Still known keys, so an old file keeps loading
 }
 
 # conf_parse NAME: read the file's text from stdin; NAME is only used in messages. Returns 2 (with a message) on anything it does not understand.

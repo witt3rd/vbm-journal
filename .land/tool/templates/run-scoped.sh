@@ -8,7 +8,7 @@
 set -uo pipefail
 # The heavy-host guard (docs/no-build-host.md): on a host with a no-build marker nothing starts (exit 2). It runs first, and again in the scoped side (--exec-argfile) just before the command is exec'd. Missing guard = refused.
 d=$(dirname "$(readlink -f "$0")"); nbg=
-for c in "$d/land/bin/no-build-guard" "$d/../bin/no-build-guard"; do [ -x "$c" ] && { nbg=$c; break; }; done
+for c in "$d/../.land/tool/bin/no-build-guard" "$d/../bin/no-build-guard"; do [ -x "$c" ] && { nbg=$c; break; }; done
 [ -n "$nbg" ] || { echo "run-scoped: REFUSED: no-build-guard is not installed next to this helper" >&2; exit 2; }
 "$nbg" || exit 2
 # internal: the scoped side. The arguments travel in a NUL-delimited file, because systemd-run's treatment of $ in its own arguments differs between versions.

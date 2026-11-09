@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The entry point: land with .land/land-direct. install creates this file once (from .land/tool/templates/land-direct-stub); it is YOURS afterwards.
+# Add what your repository needs before the exec (an environment variable, a document of what your hooks rely on); keep the exec of the pinned lander:
+# .land/tool/bin/land-check fails when this file is missing, not executable, or no longer runs the tool beside it (.land/tool/bin/land-direct). Everything under .land/tool/ is read-only.
+exec "$(cd "$(dirname "$0")" && pwd)/tool/bin/land-direct" "$@"

@@ -17,18 +17,18 @@ Markers live in `<git common dir>/vbm-land/`, shared by every worktree of the cl
 ## Steps
 
 ```
-scripts/land-direct --status                                       # shows the hold (and freeze) state
-scripts/land-direct --hold "why, who, until when"                  # stop landings
-scripts/land-direct --release                                      # allow landings again
-scripts/land-direct --freeze "why" --owner NAME --for 6h           # only fixes and reverts land
-scripts/land-direct --thaw                                         # lift it (it also lifts on expiry or a landed fix)
+.land/land-direct --status                                       # shows the hold (and freeze) state
+.land/land-direct --hold "why, who, until when"                  # stop landings
+.land/land-direct --release                                      # allow landings again
+.land/land-direct --freeze "why" --owner NAME --for 6h           # only fixes and reverts land
+.land/land-direct --thaw                                         # lift it (it also lifts on expiry or a landed fix)
 ```
 
 When `land-direct` exits 14, read the marker's reason (`--status`), and ask its owner. A red main is not a reason to freeze: whoever sees it reverts what made it red with `git revert` (`triage-red`).
 
 ## Verify
 
-`scripts/land-direct --status` shows `hold: none` after `--release`; a landing attempt while held exits 14 and pushes nothing.
+`.land/land-direct --status` shows `hold: none` after `--release`; a landing attempt while held exits 14 and pushes nothing.
 
 ## Do NOT
 

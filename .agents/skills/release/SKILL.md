@@ -15,13 +15,13 @@ Versioning: additive interface changes (config keys, exit codes, JSON keys, hook
 1. Fresh worktree off `origin/main`. Set `VERSION` (no `v`, e.g. `0.4.0`); add the `CHANGELOG.md` entry.
 2. `bin/land-manifest && bin/land-manifest --check` (the lander regenerates it too).
 3. `timeout 600 tests/run.sh` (Tier 1).
-4. Commit `chore(release): vX.Y.Z` and land: `bin/land-direct` (this repository lands itself; `scripts/land-direct` is its stub).
+4. Commit `chore(release): vX.Y.Z` and land: `bin/land-direct` (this repository lands itself; `.land/land-direct` is its wrapper).
 5. Tag the landed commit and push the tag:
    ```
    git fetch origin && git tag vX.Y.Z <landed-sha> && git push origin vX.Y.Z
    ```
 6. Verify from a scratch repository:
-   `git init -q /tmp/t && /path/to/vbm-land/install --source OWNER/vbm-land --target /tmp/t vX.Y.Z && /tmp/t/scripts/land/bin/land-check`
+   `git init -q /tmp/t && /path/to/vbm-land/install --source OWNER/vbm-land --target /tmp/t vX.Y.Z && /tmp/t/.land/tool/bin/land-check`
 
 ## Do NOT
 

@@ -24,10 +24,10 @@ There is **no override**. `VBM_ALLOW_BUILD_HERE=1` and every other variable are 
 ## The Tier 1 lint: `bin/no-build-guard --lint [ROOT]` (and `--selftest`)
 
 - `scripts/run-scoped.sh` calls the guard (a call, not a comment) before the first `systemd-run`, `setsid` or `exec`, and **really refuses**: the lint runs it with a marker present and demands exit 2 with the command not started.
-- Every runner declared in `scripts/long-runners.txt` or the optional `scripts/heavy-runners.txt` (one name per line; `NAME` = callers wrap it, `self NAME` = its own file calls `no-build-guard`) is never run outside `run-scoped.sh`, `no-build-guard` or `run-probe` in `scripts/*.sh`, `scripts/wt`, `scripts/land-direct`, `scripts/githooks/*` or a workflow. List the mutation runner and the ABI/probe test script there.
+- Every runner declared in `scripts/long-runners.txt` or the optional `scripts/heavy-runners.txt` (one name per line; `NAME` = callers wrap it, `self NAME` = its own file calls `no-build-guard`) is never run outside `run-scoped.sh`, `no-build-guard` or `run-probe` in `scripts/*.sh`, `scripts/wt`, `.land/land-direct`, `scripts/githooks/*` or a workflow. List the mutation runner and the ABI/probe test script there.
 - Declared runners with no `scripts/run-scoped.sh` fail.
 
-Wire it next to the scoped-runner lint in Tier 1: `scripts/land/bin/no-build-guard --selftest && scripts/land/bin/no-build-guard --lint .`
+Wire it next to the scoped-runner lint in Tier 1: `.land/tool/bin/no-build-guard --selftest && .land/tool/bin/no-build-guard --lint .`
 
 ## Attack list (what it stops, what it cannot)
 
@@ -36,5 +36,5 @@ Wire it next to the scoped-runner lint in Tier 1: `scripts/land/bin/no-build-gua
 3. **Calling the scoped side directly** (`run-scoped.sh --exec-argfile F`): stopped, it re-checks before it execs; tested.
 4. **Deleting or hiding the marker**: **cannot be prevented.** The marker is the owner's file; whoever can delete it (the owner, the machine's configuration tool, an agent with the owner's rights) can run the work. The defence is to keep it managed by the configuration tool, so a deletion is repaired, and to make deletion visible (a root-owned `/etc` file an unprivileged worker cannot remove).
 5. **TOCTOU**: the check is made at the start and again just before the exec; a marker that appears *after* that does not stop a run already started (the bound of `run-scoped.sh`, `RuntimeMaxSec`, still ends it). A marker swapped in a window between check and exec of one command is not a hole: the command either started or did not. A caller that checks and then starts the command by another path is the case for the lint (declare the runner).
-6. **Editing the helper or the lint away in a consumer**: the guard and the lint are vendored and drift-checked against the pin (`land-check`); `scripts/run-scoped.sh` is the consumer's own file, so the lint reads it on every Tier 1, and a repository should list it (and its `long-runners.txt`) in its protected set so that an edit of it is a gate edit.
+6. **Editing the helper or the lint away in a consumer**: the guard and the lint are vendored (in `.land/tool/`) and drift-checked against the pin (`land-check`); `scripts/run-scoped.sh` is the consumer's own file, so the lint reads it on every Tier 1, and a repository should list it (and its `long-runners.txt`) in its protected set so that an edit of it is a gate edit.
 7. **A test or tool that does not go through a helper at all** (plain `lake build`, a compiler loop, `test_abi.sh` not declared): not stopped. Declare it in `scripts/heavy-runners.txt`.

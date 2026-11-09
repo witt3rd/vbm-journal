@@ -9,6 +9,9 @@
 # Honest limit: a statically linked binary ignores the preload (its crash still leaves a record; the core is still not written).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/no-crash-record.sh"
+# Every consumer path this script names comes from lib/paths.sh beside the tool (a consumer's <LAND_DIR>/bin/../lib/, or lib/ here): never a literal.
+p=; for c in "$here/../lib/paths.sh" "$here/../../lib/paths.sh"; do [ -r "$c" ] && { p=$c; break; }; done
+[ -z "$p" ] || . "$p"
 refuse() { echo "run-probe: REFUSED: $*" >&2; exit 2; }
 want=${RUN_PROBE_CORE_LIMIT:-0}
 case ${1:-} in
@@ -17,7 +20,7 @@ case ${1:-} in
     while IFS= read -r n; do n=${n%%#*}; n=${n// /}; [ -n "$n" ] || continue
       while IFS=: read -r f ln line; do [ "$f" = "$list" ] && continue
         case $line in *run-probe*|*quiet\ *|*probe-ok*) ;; *) echo "run-probe --lint: $f:$ln runs probe '$n' outside run-probe: ${line:0:120}" >&2; bad=1;; esac
-      done < <(git ls-files -z 2>/dev/null | xargs -0 -r grep -InwF -- "$n" 2>/dev/null | grep -v '^scripts/land/' | sed 's/^\([^:]*\):\([0-9]*\):/\1:\2:/')
+      done < <(git ls-files -z 2>/dev/null | xargs -0 -r grep -InwF -- "$n" 2>/dev/null | grep -v "^${LAND_DIR:-.land/tool}/" | sed 's/^\([^:]*\):\([0-9]*\):/\1:\2:/')
     done < "$list"; exit $bad;;
   --core-limit) want=${2:?--core-limit needs a value}; shift 2;;
 esac

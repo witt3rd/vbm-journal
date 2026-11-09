@@ -6,7 +6,7 @@ push or a branch deletion cannot happen to the default branch).
 
 1. **Protect the default branch from deletion and non-fast-forward updates.**
    `gh api repos/OWNER/REPO/rulesets --input templates/ruleset-protect-main.json`
-   Read back: `gh api repos/OWNER/REPO/rules/branches/main --jq '.[].type'` prints `deletion` and `non_fast_forward` (`bin/land-audit` warns when it does not).
+   Read back: `gh api repos/OWNER/REPO/rules/branches/main --jq '.[].type'` prints `deletion` and `non_fast_forward`.
 2. **Protect release tags from deletion and update** (a pin by tag must not be movable):
    `gh api repos/OWNER/REPO/rulesets --input templates/ruleset-protect-release-tags.json`
 3. **Pull-request workflows from forks need approval for ALL outside contributors** (public repositories only; the API refuses it on a private one):
