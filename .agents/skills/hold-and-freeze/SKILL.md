@@ -24,7 +24,7 @@ scripts/land-direct --freeze "why" --owner NAME --for 6h           # only fixes 
 scripts/land-direct --thaw                                         # lift it (it also lifts on expiry or a landed fix)
 ```
 
-When `land-direct` exits 14, read the marker's reason (`--status`), and ask its owner. A red main is not a reason to freeze: the watchdog reverts what made it red (`triage-red`).
+When `land-direct` exits 14, read the marker's reason (`--status`), and ask its owner. A red main is not a reason to freeze: whoever sees it reverts what made it red with `git revert` (`triage-red`).
 
 ## Verify
 

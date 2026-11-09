@@ -1,12 +1,12 @@
 ---
 name: update-vbm-land
 description: >-
-  Update the pinned, vendored copy of vbm-land in a repository (land-update), read the "behind" report of the scheduled check, verify a signed release, and understand the manifest. Use when land-check reports drift, when the weekly vbm-land-update workflow says the repository is behind, or when asked to bump vbm-land.
+  Update the pinned, vendored copy of vbm-land in a repository (land-update), read the "behind" report of the scheduled check, verify a signed release, and understand the manifest. Use when land-check reports drift, or when asked to bump vbm-land.
 ---
 
 # update-vbm-land
 
-A repository vendors a pinned copy: `scripts/land/` (tool, templates), `scripts/land/PIN` (source, version, 40-hex commit, manifest hash, signature status), the `scripts/land-direct` entry script (yours after the first install), the vbm-land skills in `.agents/skills/`, and the scheduled workflow `.github/workflows/vbm-land-update.yml` (yours). `MANIFEST.sha256` lists the hash of every vendored file; all of them are drift-checked. Updates are **pulled by the repository**: vbm-land knows nothing about what vendors it (docs/update-propagation.md in the source).
+A repository vendors a pinned copy: `scripts/land/` (tool, templates), `scripts/land/PIN` (source, version, 40-hex commit, manifest hash, signature status), the `scripts/land-direct` entry script (yours after the first install), the vbm-land skills in `.agents/skills/`. `MANIFEST.sha256` lists the hash of every vendored file; all of them are drift-checked. Updates are **pulled by the repository**: vbm-land knows nothing about what vendors it (docs/update-propagation.md in the source).
 
 ## Know where you stand
 
@@ -15,18 +15,14 @@ scripts/land/bin/land-check              # offline: the copy still equals its pi
 scripts/land/bin/land-check --upstream   # also asks the source about the pinned commit (3: source unreachable)
 scripts/land/bin/land-update --check     # read-only: "pinned vX, latest vY: behind N releases (patch|minor|major)" (0 current, 1 behind, 3 unreachable)
 ```
-The weekly workflow runs the drift check and `land-update --auto`; "behind" shows as a warning and a summary line. It is a reminder, never a gate.
 
 ## Update (the repository's own act)
 
 1. `scripts/land/bin/land-update --diff vX.Y.Z`: verifies the release (below) and shows the changed, added and removed vendored files, their diffs and the CHANGELOG entries since your pin. Read it: new keys, exit codes, "Upgrade notes". A **major** release needs a person's decision.
 2. `scripts/land/bin/land-update --land vX.Y.Z` from a clean worktree: verify, stage, commit `chore(land): vbm-land vX.Y.Z` (with the trailers your `land.conf` requires) and land it through **your own** lander and gates, run from a pristine clone of the base branch. A hold, a red main, a failed Tier 1, a refusing hook or the attack suite stops it with the lander's exit code; the commit stays local; nothing is forced.
    Or by hand: `scripts/land/bin/land-update vX.Y.Z` (stages only), `scripts/land/bin/land-check`, review `git status`, one commit, `scripts/land-direct`.
-3. After the landing read the push CI of the base branch.
 
-**The weekly schedule** is shipped only when the source is public (`.github/visibility` = `public` in the source at install time); while it is private the workflow is dispatch-only and the check is `scripts/land/bin/land-update --check` by hand (or Run workflow). When the source flips to public, add the `schedule:` trigger back to your workflow (checklist item 11 in `scripts/land/templates/PUBLIC-REPO-SETTINGS.md`).
 
-**Automatic updates** are the repository's choice: `LAND_AUTO_UPDATE=patch|minor` in `scripts/land.conf` (default `none`) lets the weekly workflow do step 2 itself with a push token the repository holds (`VBM_LAND_PUSH_TOKEN`), on a runner with your Tier 1 toolchain. A major release is never automatic. If it fails, the workflow fails visibly: read it and do step 1 and 2 by hand.
 
 ## Other pinned packages (`scripts/NAME/`, for example the gate set)
 

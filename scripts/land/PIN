@@ -1,5 +1,5 @@
-source=/home/dt/.firstmate-homes/vbm-foundation/projects/vbm-land
-version=v0.6.0
-commit=2869c1bc754dfd4f923d70f907b491187bca8b5e
-manifest_sha256=fb2a1f4cc9111007614f9c45feafeb5f8a91de6b209c52f23574cb102d9aa085
+source=witt3rd/vbm-land
+version=v0.7.1
+commit=7aea2abee11e8da1c2e712bbb5a659f10f76504a
+manifest_sha256=c6d4b1e43126e869774c965d44397ba8c55b3a8bde6bb19980149ad75a8765f4
 signature=verified

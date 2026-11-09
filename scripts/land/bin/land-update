@@ -107,7 +107,7 @@ if [ "$land" = 1 ]; then
   if git -C "$root" cat-file -e "origin/$base:scripts/land.conf" 2>/dev/null; then conf_parse land.conf < <(git -C "$root" show "origin/$base:scripts/land.conf") || exit 2; fi
   ver=$(sed -n 's/^version=//p' "$root/$pdir/PIN" | sed -n 1p); trl=vbm-land-update-$ver; [ "$pkg" = land ] || trl=vbm-land-update-$pkg-$ver; msg=(-m "Vendored by land-update --land from $ref.")
   for t in $LAND_REQUIRE_TRAILERS; do msg+=(-m "$t: $trl"); done
-  paths=(scripts/land .agents/skills scripts/land.signers .github/workflows/vbm-land-update.yml scripts/land-direct scripts/land.conf); [ "$pkg" = land ] || paths=("$pdir" "$sf")
+  paths=(scripts/land .agents/skills scripts/land.signers scripts/land-direct scripts/land.conf); [ "$pkg" = land ] || paths=("$pdir" "$sf")
   for p in "${paths[@]}"; do [ ! -e "$root/$p" ] || git -C "$root" add -A -- "$p"; done
   git -C "$root" commit -q -m "chore(land): $label $ver" "${msg[@]}" || { echo "land-update: nothing to commit: the pin already is $ver" >&2; exit 1; }
   git clone -q "$(git -C "$root" remote get-url origin)" "$tmp/old" || { echo "land-update: cannot make the pristine clone of $base" >&2; exit 1; }
