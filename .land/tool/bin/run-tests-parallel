@@ -16,7 +16,7 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "run-tests-parallel: a script is listed twice" >&2; exit 1; }
 # the environment, not a test: a full temp directory (inodes or blocks) makes git, mktemp and every fixture fail with unrelated symptoms: say so first
 ti=$(df --output=iavail "${TMPDIR:-/tmp}" 2>/dev/null | tail -1 | tr -dc 0-9); tb=$(df --output=avail "${TMPDIR:-/tmp}" 2>/dev/null | tail -1 | tr -dc 0-9)
-{ [ -z "$ti" ] || [ "$ti" -gt "${MIN_TMP_INODES:-20000}" ]; } && { [ -z "$tb" ] || [ "$tb" -gt "${MIN_TMP_KIB:-500000}" ]; } || { echo "run-tests-parallel: ${TMPDIR:-/tmp} is nearly full ($ti free inodes, $tb KiB free): the ENVIRONMENT is the problem, not a test; free it first" >&2; exit 1; }
+{ [ -z "$ti" ] || [ "$ti" -gt "${MIN_TMP_INODES:-20000}" ]; } && { [ -z "$tb" ] || [ "$tb" -gt "${MIN_TMP_KIB:-500000}" ]; } || { echo "run-tests-parallel: ${TMPDIR:-/tmp} is nearly full ($ti free inodes, $tb KiB free): the ENVIRONMENT is the failure, not a test; free it or set TMPDIR elsewhere" >&2; exit 1; }
 out=$(mktemp -d); pids=(); trap 'reap_pids "${pids[@]}" $(cat "$out"/*.pid 2>/dev/null); rm -rf "$out"' EXIT; trap 'exit 143' INT TERM HUP
 name() { echo "${1//\//_}"; }
 run_one() {  # run_one SCRIPT: result files rc and secs only when the script ran to its end
