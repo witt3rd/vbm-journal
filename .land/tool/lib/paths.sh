@@ -6,6 +6,8 @@ LAND_MANIFEST_FILE=$LAND_DIR/MANIFEST.sha256   # the per-file checksum list of t
 LAND_CONF_FILE=$LAND_HOME/land.conf      # the repository's own settings
 LAND_HOOKS_DEFAULT=$LAND_HOME/land.d     # the repository's own hooks
 LAND_SIGNERS_FILE=$LAND_HOME/land.signers   # who may sign releases
+LAND_PINS_FILE=$LAND_HOME/pins.lock      # the libraries this repository vendors, one line each: NAME URL TAG REV TREE_SHA256 (docs/pin.md)
+LAND_VENDOR_DIR=vendor                   # where a pinned library is vendored: vendor/NAME
 LAND_ENTRY=$LAND_HOME/land-direct        # the entry script an agent runs (it execs ./tool/bin/land-direct beside itself)
 LAND_SKILLS_DIR=.agents/skills           # where the tool's agent skills are installed
 

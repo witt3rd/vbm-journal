@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# scripts/run-scoped.sh NAME MAXSEC CMD...: run a long runner (the list: scripts/long-runners.txt) in a transient systemd user scope with
+# run-scoped.sh NAME MAXSEC CMD...: run a long runner (the list: scripts/long-runners.txt) in a transient systemd user scope with
 # RuntimeMaxSec=MAXSEC, so an aborted run (the caller killed, a SIGKILL included, a terminal gone) cannot leave the runner or its children orphaned:
 # the scope is stopped on exit, on a signal and, if even this wrapper dies, by RuntimeMaxSec. Exit status = the command's (124 on the bound).
 # Standing rule: nobody kills by a derived pid or a pattern; this helper stops only its own scope, by the unit name it chose.
 # Without a usable systemd user manager (hosted CI) it falls back to setsid + timeout --kill-after with a trap that stops its own group: the same three guarantees (bound, abort, reaped on exit).
-# scripts/lint-scoped-runners.sh (Tier 1) fails any script that runs a listed runner without going through here.
+# `no-build-guard --lint` (Tier 1) fails any script that runs a listed runner without going through here, and runs this helper with a marker present to see it refuse. It ships with the tool: it is found BESIDE the guard.
 set -uo pipefail
 # The heavy-host guard (docs/no-build-host.md): on a host with a no-build marker nothing starts (exit 2). It runs first, and again in the scoped side (--exec-argfile) just before the command is exec'd. Missing guard = refused.
-d=$(dirname "$(readlink -f "$0")"); nbg=
-for c in "$d/../.land/tool/bin/no-build-guard" "$d/../bin/no-build-guard"; do [ -x "$c" ] && { nbg=$c; break; }; done
+d=$(dirname "$(readlink -f "$0")"); nbg=$d/no-build-guard; [ -x "$nbg" ] || nbg=
 [ -n "$nbg" ] || { echo "run-scoped: REFUSED: no-build-guard is not installed next to this helper" >&2; exit 2; }
 "$nbg" || exit 2
 # internal: the scoped side. The arguments travel in a NUL-delimited file, because systemd-run's treatment of $ in its own arguments differs between versions.

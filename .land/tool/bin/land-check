@@ -42,6 +42,14 @@ check_one() {   # the pin, the manifest, every listed file (hash, executable bit
   e=$(grep -v '^[[:space:]]*#' "$root/$LAND_ENTRY" 2>/dev/null || true)
   lander_rel=${LAND_DIR#"$(dirname "$LAND_ENTRY")"/}   # $LAND_DIR as the entry script sees it, from its own folder (.land/land-direct -> tool)
   { [ -x "$root/$LAND_ENTRY" ] && { [[ $e == *"$LAND_DIR/bin/land-direct"* ]] || [[ $e == *"$lander_rel/bin/land-direct"* ]]; }; } || drift "$LAND_ENTRY is missing, not executable, or does not run the pinned lander ($LAND_DIR/bin/land-direct)"
+  # RETIRED PATHS (docs/payload.md 5): files that moved into the payload; a repository carries no copy of them. A link that resolves INTO the vendored tool is allowed (the old layout tracked such links and the migration repoints them): it is the vendored bytes, it cannot diverge. Any other file or link fails.
+  local rl=$root/$LAND_DIR/lib/retired-paths.txt rp rrest
+  if [ -r "$rl" ]; then
+    while read -r rp rrest; do
+      case $rp in ''|'#'*) continue;; esac
+      if { [ -e "$root/$rp" ] || [ -L "$root/$rp" ]; } && ! { [ -L "$root/$rp" ] && case $(readlink -f "$root/$rp" 2>/dev/null) in "$(readlink -f "$root/$LAND_DIR")"/*) true;; *) false;; esac; }; then drift "$rp is retired: the tool ships it (${rrest:-docs/payload.md}); delete the repository's copy and use the vendored one"; fi
+    done < "$rl"
+  fi
   if [ -r "$root/$LAND_CONF_FILE" ]; then ( conf_defaults; conf_parse "$LAND_CONF_FILE" < "$root/$LAND_CONF_FILE" ) 2>&1 >/dev/null | sed 's/^/DRIFT: /' >&2 && [ "${PIPESTATUS[0]}" = 0 ] || bad=1; fi
   if [ -d "$root/$LAND_HOOKS_DEFAULT" ]; then   # hooks have fixed names and must be executable; `*.sh` files are helpers the hooks source; anything else is a hook that would silently never run
     for h in "$root/$LAND_HOOKS_DEFAULT"/*; do [ -f "$h" ] || continue; n=${h##*/}

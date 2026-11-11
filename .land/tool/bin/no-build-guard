@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # no-build-guard [-- CMD...]     refuse (exit 2, nothing started) on a host that carries a no-build marker (/etc/vbm/no-build-host or <config dir>/vbm/no-build-host); with CMD, then exec CMD.
-# no-build-guard --lint [ROOT]   Tier 1 lint (also --selftest, which runs the fixtures only): the repository's scripts/run-scoped.sh calls this guard before it starts anything and really refuses with a marker present;
+# no-build-guard --lint [ROOT]   Tier 1 lint (also --selftest, which runs the fixtures only): the helper beside this guard (run-scoped.sh) calls it before it starts anything and really refuses with a marker present;
 #                                a runner declared in scripts/long-runners.txt or scripts/heavy-runners.txt (`NAME`: callers wrap it, `self NAME`: its file calls this guard) is never run outside run-scoped.sh / this guard / run-probe.
 #                                The files it reads are the repository's own (its `scripts/` and githooks, its LAND_ENTRY): nothing under .github/ is read, since nothing runs after the push.
 # There is NO override: VBM_ALLOW_BUILD_HERE and every other variable are ignored. Honest limits, in docs/no-build-host.md (a deleted marker; a marker created after the check; indirection the lint cannot see).
@@ -15,7 +15,8 @@ pre='(^|[;&|(]|\$\(|--|[[:space:]](python3?|bash|sh|exec|time|nice|env))[[:space
 okpre='(run-scoped\.sh|no-build-guard|run-probe)'
 runs_bare() { local n=${1//./\\.}; grep -vE '^[[:space:]]*#' | grep -E "${pre}${n}([[:space:];&|)]|\$)" | grep -vE "${okpre}.*${n}"; }   # stdin lines that run NAME outside a helper
 lint() {
-  local root=${1:-.} bad= selfs= names= e f n rs=scripts/run-scoped.sh t sent land=${LAND_DIR-} entry=${LAND_ENTRY-}
+  local rs root=${1:-.} bad= selfs= names= e f n t sent land=${LAND_DIR-} entry=${LAND_ENTRY-}
+  rs=$(dirname "$(readlink -f "$0")")/run-scoped.sh   # the helper ships with the guard and is found BESIDE it (the vendored copy in a consumer, bin/ here): never a repository-owned copy
   cd "$root" || return 2
   for l in scripts/long-runners.txt scripts/heavy-runners.txt; do [ -f "$l" ] || continue
     while read -r a b; do case $a in ''|'#'*) ;; self) selfs="$selfs $b";; *) names="$names $a";; esac; done < "$l"; done
@@ -33,7 +34,7 @@ lint() {
   for n in $names; do
     while IFS= read -r f; do [ -f "$f" ] || continue
       [ -z "$land" ] || case $f in "$land"/*) continue;; esac          # the vendored tool is not the repository's code (LAND_DIR, lib/paths.sh)
-      case $f in scripts/run-scoped.sh|scripts/lint-scoped-runners.sh|scripts/check-scoped-runners.sh) continue;; esac
+      case $f in */run-scoped.sh|run-scoped.sh|scripts/lint-scoped-runners.sh|scripts/check-scoped-runners.sh) continue;; esac
       h=$(runs_bare "$n" < "$f" || true); [ -z "$h" ] || bad="$bad$f: runs $n outside run-scoped.sh: $(echo "$h" | sed -n 1p | cut -c1-100)"$'\n'
     done < <(git ls-files 'scripts/*.sh' scripts/wt ${entry:+"$entry"} 'scripts/githooks/*')   # LAND_ENTRY (lib/paths.sh): the entry script an agent runs
   done
@@ -44,7 +45,7 @@ selftest() {
   local t line; t=$(mktemp); trap 'rm -f "$t"' RETURN
   for line in 'python3 scripts/mutants.py --jobs 4' 'mise exec -- scripts/mutants.py' 'x=$(python3 scripts/mutants.py)' 'true; bash scripts/mutants.py' 'run | scripts/mutants.py'; do
     [ -n "$(printf '%s\n' "$line" | runs_bare mutants.py || true)" ] || { echo "no-build-guard --selftest: did not flag: $line" >&2; return 1; }; done
-  for line in 'scripts/run-scoped.sh mutants 3600 python3 scripts/mutants.py' "${LAND_DIR-}/bin/no-build-guard -- python3 scripts/mutants.py" '# python3 scripts/mutants.py' 'echo "see mutants.py"' 'cat scripts/mutants.py'; do
+  for line in '.land/tool/bin/run-scoped.sh mutants 3600 python3 scripts/mutants.py' "${LAND_DIR-}/bin/no-build-guard -- python3 scripts/mutants.py" '# python3 scripts/mutants.py' 'echo "see mutants.py"' 'cat scripts/mutants.py'; do
     [ -z "$(printf '%s\n' "$line" | runs_bare mutants.py || true)" ] || { echo "no-build-guard --selftest: flagged a good line: $line" >&2; return 1; }; done
   printf '%s\n' "# ${LAND_DIR-}/bin/no-build-guard" > "$t"; ! guard_ok "$t" || { echo "no-build-guard --selftest: a commented call passed" >&2; return 1; }
   printf '%s\n' '"$d/land/bin/no-build-guard" || exit 2' > "$t"; guard_ok "$t" || { echo "no-build-guard --selftest: a call was refused" >&2; return 1; }

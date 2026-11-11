@@ -21,6 +21,7 @@ A repository vendors a pinned copy: `.land/tool/` (tool, templates and `MANIFEST
 1. `.land/tool/bin/land-update --diff vX.Y.Z`: verifies the release (below) and shows the changed, added and removed vendored files, their diffs and the CHANGELOG entries since your pin. Read it: new keys, exit codes, "Upgrade notes". A **major** release needs a person's decision.
 2. `.land/tool/bin/land-update --land vX.Y.Z` from a clean worktree: verify, stage, commit `chore(land): vbm-land vX.Y.Z` (with the trailers your `land.conf` requires) and land it through **your own** lander and gates, run from a pristine clone of the base branch. A hold, a red main, a failed Tier 1, a refusing hook or the attack suite stops it with the lander's exit code; the commit stays local; nothing is forced.
    Or by hand: `.land/tool/bin/land-update vX.Y.Z` (stages only), `.land/tool/bin/land-check`, review `git status`, one commit, `.land/land-direct`.
+3. A release that RETIRES paths (files that moved into the tool: `.land/tool/lib/retired-paths.txt`) makes `land-check` fail until the repository's own copies are gone. In the SAME commit as the update: delete each retired path that exists, point its callers at the vendored one (for example `. scripts/lib-ran.sh` becomes `. .land/tool/lib/ran.sh`), and delete the tests of the copies; the tool tests them. Nothing else changes in that commit.
 
 
 

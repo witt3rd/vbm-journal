@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# run-tests-parallel SCRIPT...   (docs/payload.md 4c)
+# Run independent test scripts in parallel: the wall time is the longest script, not the sum. Each script runs in its own TMPDIR (so its mktemp dirs cannot clash) with its output captured; a passing script prints one
+# line, a failing one prints its whole log. The run FAILS if any script fails, is missing, or leaves no result (killed, or never started): a skipped script is a failure, never a pass; so is a script that exits 0
+# without a ran-evidence line (`ran: NAME: N cases`, N > 0; lib/ran.sh, read by the reader beside this file) or that reports SKIPPED.
+#   TEST_JOBS     how many run at once (default: the core count).
+#   TEST_TIMEOUT  seconds one script may take before it is killed (default: none: no limit is introduced for a repository that did not ask for one).
+# An aborted run (INT, TERM, HUP) stops the jobs it started, by the pids it holds, each a process group of its own (lib/reap.sh); never by a pattern.
+# Scripts must bind ports of their own, never fixed ones. A test that passes alone but fails here (or only on a cold machine) is a bug in the test: find it, never retry it or raise a timeout. Do not wait a fixed time;
+# wait on the readiness signal.
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/../lib/reap.sh"
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+[ $# -gt 0 ] || { echo "run-tests-parallel: no scripts given" >&2; exit 1; }
+[ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "run-tests-parallel: a script is listed twice" >&2; exit 1; }
+# the environment, not a test: a full temp directory (inodes or blocks) makes git, mktemp and every fixture fail with unrelated symptoms: say so first
+ti=$(df --output=iavail "${TMPDIR:-/tmp}" 2>/dev/null | tail -1 | tr -dc 0-9); tb=$(df --output=avail "${TMPDIR:-/tmp}" 2>/dev/null | tail -1 | tr -dc 0-9)
+{ [ -z "$ti" ] || [ "$ti" -gt "${MIN_TMP_INODES:-20000}" ]; } && { [ -z "$tb" ] || [ "$tb" -gt "${MIN_TMP_KIB:-500000}" ]; } || { echo "run-tests-parallel: ${TMPDIR:-/tmp} is nearly full ($ti free inodes, $tb KiB free): the ENVIRONMENT is the problem, not a test; free it first" >&2; exit 1; }
+out=$(mktemp -d); pids=(); trap 'reap_pids "${pids[@]}" $(cat "$out"/*.pid 2>/dev/null); rm -rf "$out"' EXIT; trap 'exit 143' INT TERM HUP
+name() { echo "${1//\//_}"; }
+run_one() {  # run_one SCRIPT: result files rc and secs only when the script ran to its end
+  local n t0=$SECONDS rc; n=$(name "$1"); mkdir "$out/$n.tmp"
+  TMPDIR="$out/$n.tmp" ${TEST_TIMEOUT:+timeout --kill-after=10 "$TEST_TIMEOUT"} bash "$1" > "$out/$n.log" 2>&1 < /dev/null &
+  echo $! > "$out/$n.pid"; wait $!; rc=$?   # `timeout` makes a process group of its own, so the pid it holds is recorded: an abort must reach it (the job's own group would not contain the test)
+  echo $(( SECONDS - t0 )) > "$out/$n.secs"; echo $rc > "$out/$n.rc"
+}
+set -m   # every background job is a process group of its own: one signal to -pid reaches it and what it spawned
+max=${TEST_JOBS:-$(nproc)}
+for s in "$@"; do
+  run_one "$s" & pids+=($!)
+  while [ "$(jobs -rp | wc -l)" -ge "$max" ]; do wait -n 2>/dev/null || true; done
+done
+wait
+ev=$here/ran-evidence   # a script that exits 0 without printing `ran: NAME: N cases` (N > 0), or that reports SKIPPED, did not run its checks: a failure (docs/ran-evidence.md)
+bad=0
+for s in "$@"; do
+  n=$(name "$s")
+  if [ ! -f "$s" ]; then echo "FAIL $s: no such script" >&2; bad=1
+  elif [ ! -f "$out/$n.rc" ]; then echo "FAIL $s: no result (it was skipped, or died before it finished)" >&2; cat "$out/$n.log" 2>/dev/null >&2; bad=1
+  elif [ "$(cat "$out/$n.rc")" != 0 ]; then echo "FAIL $s: exit $(cat "$out/$n.rc") after $(cat "$out/$n.secs") s$([ "$(cat "$out/$n.rc")" = 124 ] && echo " (TEST_TIMEOUT=${TEST_TIMEOUT:-?})")" >&2; cat "$out/$n.log" >&2; bad=1
+  elif ! "$ev" check "$s" "$out/$n.log" 2> "$out/$n.ev"; then echo "FAIL $s: exit 0 but no ran-evidence ($(tr '\n' ' ' < "$out/$n.ev"))" >&2; cat "$out/$n.log" >&2; bad=1
+  else cat "$out/$n.ev" 2>/dev/null >&2; echo "ok   $s ($(cat "$out/$n.secs") s, $(awk '/^ran: [^:]+: [0-9]+ cases$/ {t += $3} END {print t + 0}' "$out/$n.log") cases)"
+  fi
+done
+if [ $bad = 0 ]; then echo "run-tests-parallel: $# scripts passed"; echo "ran: tests: $(cat "$out"/*.log | awk '/^ran: [^:]+: [0-9]+ cases$/ {t += $3} END {print t + 0}') cases"   # the evidence of the whole batch
+else echo "run-tests-parallel: FAILED" >&2; fi
+exit $bad

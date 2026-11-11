@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# land-release [--push]   (any repository, maintainer only; docs/pin.md section 2)
+# Makes the release: the annotated, SIGNED tag v<VERSION> on HEAD. Its message records tree_sha256= (the tree hash of the exported HEAD, so the signature binds every file: land-pin vendor checks it),
+# and, for a repository that ships a MANIFEST.sha256 (this tool's source), manifest_sha256= too (land-update, install). Consumers verify the signature against their own .land/land.signers first.
+#   Requires: a clean tree, HEAD == origin/main (the release is what main is), a fresh MANIFEST.sha256 where the repository has one, the tag not yet existing, and a signing key:
+#   LAND_SIGNING_KEY=<path to an ssh key; the public half is what .land/land.signers lists>. ssh signing, no gpg. Key custody and rotation are the maintainer's.
+#   --push also pushes the tag (never a branch).
+set -euo pipefail
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/verify.sh"
+root=$(git -C "$here" rev-parse --show-toplevel); cd "$root"
+push=0; [ "${1:-}" != --push ] || push=1
+key=${LAND_SIGNING_KEY:?set LAND_SIGNING_KEY to the ssh key that signs releases}
+[ -r "$key" ] || { echo "land-release: cannot read $key" >&2; exit 2; }
+ver=$(cat VERSION); [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "land-release: VERSION ($ver) is not a plain X.Y.Z" >&2; exit 2; }
+tag=v$ver
+[ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "land-release: the tree is not clean" >&2; exit 1; }
+git fetch -q origin; [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "land-release: HEAD is not origin/main: a release is what main is" >&2; exit 1; }
+name=$(basename "$(git remote get-url origin)" .git); msgs=(-m "$name $tag")
+if [ -f MANIFEST.sha256 ]; then
+  bin/land-manifest --check >/dev/null || { echo "land-release: MANIFEST.sha256 is stale" >&2; exit 1; }
+  msgs+=(-m "manifest_sha256=$(sha256sum < MANIFEST.sha256 | cut -d' ' -f1)")
+fi
+! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "land-release: $tag already exists (tags are never moved)" >&2; exit 1; }
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; export_commit . HEAD "$d"
+th=$(tree_hash "$d" 2>&1) || { echo "land-release: the tree cannot be hashed: $th" >&2; exit 1; }
+git -c gpg.format=ssh -c "user.signingkey=$key" tag -s "$tag" "${msgs[@]}" -m "tree_sha256=$th"
+echo "land-release: signed tag $tag on $(git rev-parse --short HEAD)"
+if [ "$push" = 1 ]; then git push -q origin "refs/tags/$tag"; echo "land-release: pushed $tag"; else echo "land-release: push it with: git push origin refs/tags/$tag"; fi

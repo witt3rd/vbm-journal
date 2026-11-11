@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# The reader of ran-evidence (lib/ran.sh; docs/ran-evidence.md). The line format is exactly
+#     ran: NAME: N cases              NAME = [A-Za-z0-9_.-]+, N = a positive integer
+#   ran-evidence check NAME LOGFILE   exit 0 only when LOGFILE has at least one ran line and the sum of its N is > 0 and it holds no SKIPPED line (VBM_ALLOW_SKIP=1 lets a
+#                                                 SKIPPED line through with a loud note: a box without an optional tool; the ran line is still required of the rest of the script).
+#   ran-evidence gate NAME REGEX CMD...   run CMD (a gate that prints its own count); its output is shown; the gate FAILS when CMD fails, or prints no line matching REGEX
+#                                                 (an ERE with ONE capture group, the number of cases it executed), or the number is 0; on success it prints `ran: NAME: N cases`.
+#   ran-evidence check-dir DIR MAP    for every DIR/NAME.log (the captured output of a concurrent gate): when MAP (lines `NAME REGEX`) names NAME, the number REGEX captures in that log must be
+#                                                 > 0 (the gate's own count, read after it ran; the line `ran: NAME: N cases` is printed); otherwise the log must carry a ran line (`check`). A log with neither fails.
+# A refused, skipped or guard-exited gate prints no count: it FAILS here, whatever its exit status was.
+#
+# HONEST WEAKNESS: a count regex proves a count was printed, not that every case was meaningful; and a script's ran_case count is the checks it evaluated, not coverage.
+set -uo pipefail
+LC_ALL=C; export LC_ALL
+bad() { echo "ran-evidence: $*" >&2; exit 1; }
+case "${1:-}" in
+  check)
+    name=${2:?name}; log=${3:?log}; [ -f "$log" ] || bad "$name: no log"
+    skipped=0; if grep -qE '(^|[^A-Za-z])SKIPPED' "$log"; then skipped=1
+      [ "${VBM_ALLOW_SKIP:-0}" = 1 ] || bad "$name: it reports SKIPPED: a skipped check is a failure, never a pass (VBM_ALLOW_SKIP=1 only on a box that lacks an optional tool)"
+      echo "ran-evidence: $name: SKIPPED part allowed by VBM_ALLOW_SKIP=1 (NOT RUN)" >&2
+    fi
+    total=0; seen=0
+    while IFS= read -r n; do seen=1; total=$((total + n)); done < <(sed -nE 's/^ran: [A-Za-z0-9_.-]+: ([0-9]+) cases$/\1/p' "$log")
+    if [ "$seen" = 0 ] && [ "$skipped" = 1 ] && [ "${VBM_ALLOW_SKIP:-0}" = 1 ]; then exit 0; fi   # wholly skipped on a box without the tool, allowed by name
+    [ "$seen" = 1 ] || bad "$name: it printed no 'ran: NAME: N cases' line (it may have been refused, skipped or exited before it ran anything)"
+    [ "$total" -gt 0 ] || bad "$name: it reports zero executed cases"
+    ;;
+  gate)
+    name=${2:?name}; re=${3:?regex}; shift 3; [ $# -gt 0 ] || bad "$name: no command"
+    out=$(mktemp "${TMPDIR:-/tmp}/ran-gate.XXXXXX"); trap 'rm -f "$out"' EXIT
+    rc=0; "$@" > "$out" 2>&1 || rc=$?
+    cat "$out"
+    [ "$rc" = 0 ] || bad "$name: the gate failed (exit $rc)"
+    total=0; seen=0
+    while IFS= read -r n; do seen=1; total=$((total + n)); done < <(grep -oE -- "$re" "$out" | sed -E "s#$re#\\1#" | grep -E '^[0-9]+$' || true)
+    [ "$seen" = 1 ] || bad "$name: no line matching /$re/ in its output: it did not report what it executed (refused, skipped or exited early)"
+    [ "$total" -gt 0 ] || bad "$name: it reports zero executed cases"
+    grep -qxF "ran: $name: $total cases" "$out" || echo "ran: $name: $total cases"   # a script that printed its own line for this name does not get it twice
+    ;;
+  check-dir)
+    dir=${2:?dir}; map=${3:?map}; [ -d "$dir" ] && [ -f "$map" ] || bad "check-dir: no such directory or map"
+    n=0; failed=0
+    for log in "$dir"/*.log; do
+      [ -e "$log" ] || continue; name=$(basename "$log" .log); n=$((n + 1))
+      re=$(awk -v n="$name" '$1 == n {sub(/^[^ \t]+[ \t]+/, ""); print; exit}' "$map")
+      if [ -n "$re" ]; then
+        total=0; seen=0
+        while IFS= read -r c; do seen=1; total=$((total + c)); done < <(grep -oE -- "$re" "$log" | sed -E "s#$re#\\1#" | grep -E '^[0-9]+$' || true)
+        if [ "$seen" = 0 ]; then echo "ran-evidence: $name: no line matching /$re/ in its output: it did not report what it executed (refused, skipped or exited early)" >&2; failed=1
+        elif [ "$total" -le 0 ]; then echo "ran-evidence: $name: it reports zero executed cases" >&2; failed=1
+        else grep -qxF "ran: $name: $total cases" "$log" || echo "ran: $name: $total cases"; fi
+      else
+        "$0" check "$name" "$log" || failed=1
+      fi
+    done
+    [ "$n" -gt 0 ] || bad "check-dir: no gate logs in $dir"
+    [ "$failed" = 0 ] || exit 1
+    ;;
+  *) echo "usage: ran-evidence check NAME LOG | gate NAME REGEX CMD... | check-dir DIR MAP" >&2; exit 2;;
+esac

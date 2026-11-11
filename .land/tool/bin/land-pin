@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# land-pin tree DIR | vendor NAME URL TAG | verify | online | list        (docs/pin.md). Run from the repository root, or set LAND_PIN_ROOT.
+#   tree DIR  print the tree hash of DIR.
+#   vendor    the ONLY way to add or move a pin: fetch the tag, REFUSE unless it is annotated and signed by a key in the signers file, its message records exactly one tree_sha256= and the exported tree
+#             hashes to it; then replace vendor/NAME and the lock line, and run verify. A refusal changes nothing.
+#   online    the slow tier: each locked tag must still point at the locked commit on its remote (a moved, deleted or unreachable one is refused); a newer tag is reported, never applied.
+#   list      the locked names, one per line.
+#   verify    offline: every locked library is vendored and unchanged, no vendored library is unlocked, and every copy of a library in the closure (any depth) is the same.
+#             Exit 0 ok; 1 refused (every reason printed); 2 usage or a malformed lock. A missing lock is an empty lock.
+set -euo pipefail
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/../lib/paths.sh"; . "$here/../lib/verify.sh"
+root=${LAND_PIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+die() { echo "land-pin: $*" >&2; exit 2; }
+refuse() { echo "land-pin: REFUSED $*" >&2; exit 1; }
+scratch=; trap '[ -z "$scratch" ] || rm -rf "$scratch"' EXIT
+
+read_lock() {   # parallel arrays L_NAME L_URL L_TAG L_REV L_HASH; read strictly
+  L_NAME=(); L_URL=(); L_TAG=(); L_REV=(); L_HASH=()
+  local f=$root/$LAND_PINS_FILE n=0 line name url tag rev hash extra x at
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1)); line=${line%%#*}; name=; hash=; extra=; at="$LAND_PINS_FILE:$n"
+    read -r name url tag rev hash extra <<<"$line" || true
+    [ -n "$name" ] || continue
+    { [ -n "$hash" ] && [ -z "$extra" ]; } || die "$at: want NAME URL TAG REV TREE_SHA256 (5 fields)"
+    [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "$at: bad name '$name'"
+    [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "$at: the tag must be vX.Y.Z, got '$tag'"
+    [[ $rev =~ ^[0-9a-f]{40}$ ]] || die "$at: the rev must be 40 hex digits"
+    [[ $hash =~ ^[0-9a-f]{64}$ ]] || die "$at: the tree hash must be 64 hex digits"
+    for x in ${L_NAME[@]+"${L_NAME[@]}"}; do [ "$x" != "$name" ] || die "$at: duplicate name '$name'"; done
+    L_NAME+=("$name"); L_URL+=("$url"); L_TAG+=("$tag"); L_REV+=("$rev"); L_HASH+=("$hash")
+  done < "$f"
+}
+
+verify() {
+  local bad=0 i d got name vend=$root/$LAND_VENDOR_DIR v n copies=()
+  note() { echo "land-pin: BAD $*" >&2; bad=1; }
+  read_lock
+  for ((i = 0; i < ${#L_NAME[@]}; i++)); do
+    name=${L_NAME[$i]}; d=$vend/$name
+    [ -d "$d" ] || { note "$name: $LAND_VENDOR_DIR/$name is missing"; continue; }
+    if got=$(tree_hash "$d" 2>&1); then
+      if [ "$got" = "${L_HASH[$i]}" ]; then echo "pin $name ${L_TAG[$i]} ${L_REV[$i]:0:12}: ok"
+      else note "$name: the tree hash is $got, the lock says ${L_HASH[$i]} (an edited, added or deleted file)"; fi
+    else note "$name: $got"; fi
+  done
+  if [ -d "$vend" ]; then
+    for d in "$vend"/*/; do
+      [ -d "$d" ] || continue; name=$(basename "$d"); n=0
+      for v in ${L_NAME[@]+"${L_NAME[@]}"}; do [ "$v" != "$name" ] || n=1; done
+      [ "$n" = 1 ] || note "$name: $LAND_VENDOR_DIR/$name is vendored but not in the lock (an unlocked library)"
+    done
+    while IFS= read -r -d '' v; do   # every copy of a library, at any depth: one version of each in the closure
+      for d in "$v"/*/; do [ -d "$d" ] || continue; d=${d%/}; copies+=("$(basename "$d") $(tree_hash "$d" 2>/dev/null || echo unreadable) ${d#"$root"/}"); done
+    done < <(find "$vend" \( -name .lake -o -name .git \) -prune -o -type d -name "$LAND_VENDOR_DIR" -print0)
+    if [ ${#copies[@]} -gt 0 ]; then
+      while read -r name; do
+        note "$name: copies of it differ in the closure: $(printf '%s\n' "${copies[@]}" | awk -v n="$name" '$1 == n {printf "%s(%s) ", $3, substr($2, 1, 12)}')"
+      done < <(printf '%s\n' "${copies[@]}" | sort -u -k1,2 | awk '{c[$1]++} END {for (k in c) if (c[k] > 1) print k}' | sort)
+    fi
+  fi
+  [ "$bad" = 0 ] && echo "land-pin: verify ok (${#L_NAME[@]} pins)"
+  return "$bad"
+}
+
+vendor() {
+  [ $# = 3 ] || die "usage: land-pin vendor NAME URL TAG"
+  local name=$1 url=$2 tag=$3 signers=$root/$LAND_SIGNERS_FILE dest=$root/$LAND_VENDOR_DIR/$1 f=$root/$LAND_PINS_FILE rev want
+  [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "bad name '$name'"
+  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the tag must be vX.Y.Z, got '$tag'"
+  [[ $url =~ ^[^[:space:]]+$ ]] || die "bad url"
+  scratch=$(mktemp -d); git init -q "$scratch/r"
+  git -C "$scratch/r" fetch -q --depth 1 "$url" "refs/tags/$tag:refs/tags/$tag" 2>/dev/null || refuse "cannot fetch the tag $tag from $url"
+  mkdir "$scratch/x"
+  want=$(src_check_tag "$scratch/r" "$tag" "$signers" "$scratch/x") || exit 1   # the one verifier (lib/verify.sh): it prints why it refused
+  rev=$(git -C "$scratch/r" rev-parse "refs/tags/$tag^{commit}")
+  mkdir -p "$root/$LAND_VENDOR_DIR" "$(dirname "$f")"; rm -rf "$dest"; mv "$scratch/x" "$dest"; touch "$f"
+  awk -v n="$name" -v l="$name $url $tag $rev $want" '{ split($0, a, "#"); split(a[1], b, " "); if (b[1] == n) { if (!d) { print l; d = 1 }; next } print } END { if (!d) print l }' "$f" > "$f.new" && mv "$f.new" "$f"
+  echo "land-pin: vendored $name $tag ($rev) into $LAND_VENDOR_DIR/$name"
+  verify
+}
+
+online() {
+  local bad=0 i name url tag rev out peeled last
+  read_lock
+  for ((i = 0; i < ${#L_NAME[@]}; i++)); do
+    name=${L_NAME[$i]}; url=${L_URL[$i]}; tag=${L_TAG[$i]}; rev=${L_REV[$i]}
+    out=$(git ls-remote "$url" "refs/tags/$tag" "refs/tags/$tag^{}" 2>/dev/null) || { echo "land-pin: BAD $name: cannot reach $url" >&2; bad=1; continue; }
+    [ -n "$out" ] || { echo "land-pin: BAD $name: the tag $tag does not exist at $url" >&2; bad=1; continue; }
+    peeled=$(awk '$2 ~ /\^\{\}$/ {print $1}' <<<"$out"); [ -n "$peeled" ] || peeled=$(awk 'NR == 1 {print $1}' <<<"$out")
+    if [ "$peeled" = "$rev" ]; then echo "pin $name $tag: ok (the tag still points at ${rev:0:12})"
+    else echo "land-pin: BAD $name: $tag points at $peeled, the lock says $rev" >&2; bad=1; fi
+    last=$(git ls-remote --tags --refs "$url" 'refs/tags/v*' 2>/dev/null | sed -E 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | awk 'END {print}' || true)
+    if [ -n "$last" ] && [ "$last" != "$tag" ] && [ "$(printf '%s\n%s\n' "$tag" "$last" | sort -V | awk 'END {print}')" = "$last" ]; then echo "pin $name: newer: $last (not applied: land-pin vendor $name $url $last)"; fi
+  done
+  return "$bad"
+}
+
+case ${1:-} in
+  tree) [ $# = 2 ] || die "usage: land-pin tree DIR"; tree_hash "$2";;
+  vendor) shift; vendor "$@";;
+  verify) [ $# = 1 ] || die "usage: land-pin verify"; verify;;
+  online) [ $# = 1 ] || die "usage: land-pin online"; online;;
+  list) [ $# = 1 ] || die "usage: land-pin list"; read_lock; for n in ${L_NAME[@]+"${L_NAME[@]}"}; do echo "$n"; done;;
+  *) die "usage: land-pin tree DIR | vendor NAME URL TAG | verify | online | list";;
+esac
