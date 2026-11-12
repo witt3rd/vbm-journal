@@ -8,6 +8,7 @@ LAND_HOOKS_DEFAULT=$LAND_HOME/land.d     # the repository's own hooks
 LAND_SIGNERS_FILE=$LAND_HOME/land.signers   # who may sign releases
 LAND_PINS_FILE=$LAND_HOME/pins.lock      # the libraries this repository vendors, one line each: NAME URL TAG REV TREE_SHA256 (docs/pin.md)
 LAND_VENDOR_DIR=vendor                   # where a pinned library is vendored: vendor/NAME
+LAND_LEAN_CONF_FILE=$LAND_HOME/lean.conf   # the repository's settings for the Lean gates (docs/lean-gates.md): its PRESENCE turns them on
 LAND_ENTRY=$LAND_HOME/land-direct        # the entry script an agent runs (it execs ./tool/bin/land-direct beside itself)
 LAND_SKILLS_DIR=.agents/skills           # where the tool's agent skills are installed
 

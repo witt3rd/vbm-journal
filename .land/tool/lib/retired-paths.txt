@@ -1,18 +1,19 @@
 # Files that moved into the payload (docs/payload.md): a repository carries no copy of them, so `land-check` fails when one is there, as a file or a link.
-# One per line: RETIRED_PATH (relative to the repository root), then what replaces it (a payload path under .land/tool/, or a note). Hash-checked with the tool: it cannot be edited away in a consumer.
-scripts/lib-ran.sh              lib/ran.sh
-scripts/ran-evidence.sh         bin/ran-evidence
-scripts/run-tests-parallel.sh   bin/run-tests-parallel
-scripts/run-scoped.sh           bin/run-scoped.sh
-scripts/lib-reap.sh             lib/reap.sh
-scripts/lib-no-crash-record.sh  lib/no-crash-record.sh
-scripts/no-crash-record.sh      bin/no-crash-record
-scripts/pinned-lib.py           bin/land-pin (the lock is .land/pins.lock)
-scripts/pinned-libs.lock        bin/land-pin (the lock is .land/pins.lock)
+# One per line: RETIRED_PATH (relative to the repository root), then why, in words land-check prints after the path: `the tool ships <payload path>` or `tested by the tool itself (...)`. Hash-checked with the tool: it cannot be edited away in a consumer.
+scripts/lib-ran.sh              the tool ships lib/ran.sh
+scripts/ran-evidence.sh         the tool ships bin/ran-evidence
+scripts/run-tests-parallel.sh   the tool ships bin/run-tests-parallel
+scripts/run-scoped.sh           the tool ships bin/run-scoped.sh
+scripts/lib-reap.sh             the tool ships lib/reap.sh
+scripts/lib-no-crash-record.sh  the tool ships lib/no-crash-record.sh
+scripts/no-crash-record.sh      the tool ships bin/no-crash-record
+scripts/pinned-lib.py           the tool ships bin/land-pin (the lock is .land/pins.lock)
+scripts/pinned-libs.lock        the tool ships bin/land-pin (the lock is .land/pins.lock)
 scripts/test_ran_evidence.sh    tested by the tool itself (tests/test_ran.sh)
 scripts/test_run_parallel.sh    tested by the tool itself (tests/test_runner.sh)
 scripts/test_no_crash_record.sh tested by the tool itself (tests/test_no_crash_record.sh)
+scripts/AxiomGate.lean         the tool ships lean/AxiomGate.lean (run it with land-lean axiom)
 scripts/test_reap.sh            tested by the tool itself (tests/test_run_scoped.sh)
 scripts/test_run_scoped.sh      tested by the tool itself (tests/test_run_scoped.sh)
 scripts/test_tmp_preflight.sh   tested by the tool itself (tests/test_runner.sh)
-scripts/lint-scoped-runners.sh  bin/no-build-guard (--lint)
+scripts/lint-scoped-runners.sh  the tool ships bin/no-build-guard (--lint)

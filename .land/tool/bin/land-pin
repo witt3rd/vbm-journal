@@ -71,6 +71,7 @@ vendor() {
   [[ $name =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "bad name '$name'"
   [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the tag must be vX.Y.Z, got '$tag'"
   [[ $url =~ ^[^[:space:]]+$ ]] || die "bad url"
+  case $url in git@*|ssh://*) echo "land-pin: warning: $url is an ssh address: a lock is shared data, so use the public https URL (an ssh address needs credentials, and a scorer only accepts https GitHub repositories)" >&2;; esac
   scratch=$(mktemp -d); git init -q "$scratch/r"
   git -C "$scratch/r" fetch -q --depth 1 "$url" "refs/tags/$tag:refs/tags/$tag" 2>/dev/null || refuse "cannot fetch the tag $tag from $url"
   mkdir "$scratch/x"

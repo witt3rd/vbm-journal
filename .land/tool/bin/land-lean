@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# land-lean axiom [--selftest]   (docs/lean-gates.md, docs/payload.md 4a)
+# The Lean gates this tool ships, for a repository that has .land/lean.conf (its presence is the opt-in). The file says WHICH modules to audit, in land.conf's grammar and read by the same parser (lib/conf.sh);
+# the tool owns HOW (lean/AxiomGate.lean). Run from the repository root, or set LAND_LEAN_ROOT.
+#   axiom   every constant of the audited roots depends only on the three standard axioms; --selftest also runs the differential test. Needs LAND_LEAN_AXIOM_IMPORTS and LAND_LEAN_AXIOM_ROOTS.
+# Exit: 0 ok | 1 the gate failed | 2 usage or a refused configuration.
+set -euo pipefail
+export LC_ALL=C
+here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/conf.sh"
+root=${LAND_LEAN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+cmd=${1:-}; [ $# -eq 0 ] || shift
+cf=$root/$LAND_LEAN_CONF_FILE
+[ -f "$cf" ] || { echo "land-lean: no $LAND_LEAN_CONF_FILE: the Lean gates are on for a repository that has one (docs/payload.md 1a)" >&2; exit 2; }
+lean_conf_defaults; conf_parse "$LAND_LEAN_CONF_FILE" "$lean_conf_keys" < "$cf" || exit 2
+lean_conf_validate || exit 2
+case $cmd in
+  axiom)
+    [ -n "$LAND_LEAN_AXIOM_IMPORTS" ] || { echo "land-lean: axiom needs LAND_LEAN_AXIOM_IMPORTS in $LAND_LEAN_CONF_FILE (the modules to import)" >&2; exit 2; }
+    [ -n "$LAND_LEAN_AXIOM_ROOTS" ] || { echo "land-lean: axiom needs LAND_LEAN_AXIOM_ROOTS in $LAND_LEAN_CONF_FILE (the module roots to audit)" >&2; exit 2; }
+    cd "$root"; exec lake env lean --run "$here/../lean/AxiomGate.lean" --imports "${LAND_LEAN_AXIOM_IMPORTS// /,}" --roots "${LAND_LEAN_AXIOM_ROOTS// /,}" "$@";;
+  *) echo "usage: land-lean axiom [--selftest]" >&2; exit 2;;
+esac

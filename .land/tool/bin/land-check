@@ -47,9 +47,10 @@ check_one() {   # the pin, the manifest, every listed file (hash, executable bit
   if [ -r "$rl" ]; then
     while read -r rp rrest; do
       case $rp in ''|'#'*) continue;; esac
-      if { [ -e "$root/$rp" ] || [ -L "$root/$rp" ]; } && ! { [ -L "$root/$rp" ] && case $(readlink -f "$root/$rp" 2>/dev/null) in "$(readlink -f "$root/$LAND_DIR")"/*) true;; *) false;; esac; }; then drift "$rp is retired: the tool ships it (${rrest:-docs/payload.md}); delete the repository's copy and use the vendored one"; fi
+      if { [ -e "$root/$rp" ] || [ -L "$root/$rp" ]; } && ! { [ -L "$root/$rp" ] && case $(readlink -f "$root/$rp" 2>/dev/null) in "$(readlink -f "$root/$LAND_DIR")"/*) true;; *) false;; esac; }; then drift "$rp is retired: ${rrest:-see docs/payload.md}; delete the repository's copy"; fi
     done < "$rl"
   fi
+  if [ -r "$root/$LAND_LEAN_CONF_FILE" ]; then ( lean_conf_defaults; conf_parse "$LAND_LEAN_CONF_FILE" "$lean_conf_keys" < "$root/$LAND_LEAN_CONF_FILE" && lean_conf_validate ) 2>&1 >/dev/null | sed 's/^/DRIFT: /' >&2 && [ "${PIPESTATUS[0]}" = 0 ] || bad=1; fi
   if [ -r "$root/$LAND_CONF_FILE" ]; then ( conf_defaults; conf_parse "$LAND_CONF_FILE" < "$root/$LAND_CONF_FILE" ) 2>&1 >/dev/null | sed 's/^/DRIFT: /' >&2 && [ "${PIPESTATUS[0]}" = 0 ] || bad=1; fi
   if [ -d "$root/$LAND_HOOKS_DEFAULT" ]; then   # hooks have fixed names and must be executable; `*.sh` files are helpers the hooks source; anything else is a hook that would silently never run
     for h in "$root/$LAND_HOOKS_DEFAULT"/*; do [ -f "$h" ] || continue; n=${h##*/}

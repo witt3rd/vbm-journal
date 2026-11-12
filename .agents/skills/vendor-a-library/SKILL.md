@@ -9,7 +9,7 @@ description: >-
 One way, one tool: `.land/tool/bin/land-pin` (the contract is `docs/pin.md` in vbm-land). A library is vendored as source at `vendor/NAME/` and listed in `.land/pins.lock`; it is never fetched at build time.
 
 ## Steps
-1. Add or bump: `.land/tool/bin/land-pin vendor NAME URL vX.Y.Z`. It REFUSES unless the tag is annotated, signed by a key in `.land/land.signers`, records exactly one `tree_sha256=`, and the exported tree matches it; a refusal changes nothing. Commit `vendor/NAME/` and the lock together: a bump is one commit.
+1. Add or bump: `.land/tool/bin/land-pin vendor NAME URL vX.Y.Z`, with the PUBLIC https URL (`https://github.com/OWNER/NAME.git`): the URL is written into the lock, which is shared data; an ssh address needs credentials, and the standard's scorer accepts only allowlisted https GitHub repositories. It REFUSES unless the tag is annotated, signed by a key in `.land/land.signers`, records exactly one `tree_sha256=`, and the exported tree matches it; a refusal changes nothing. Commit `vendor/NAME/` and the lock together: a bump is one commit.
 2. Require it by path in the build file (Lean: `require «vbm-x» from "vendor/vbm-x"`) and name its files as `__dir__ / "vendor" / "vbm-x" / ...`. Never `from git`, never a `.lake/packages` path, never code that looks for a sibling.
 3. Put `.land/tool/bin/land-pin verify` in the repository's fast gate. Put `.land/tool/bin/land-pin online` in the scheduled slow tier: it refuses a moved, deleted or unreachable tag and reports newer ones without applying them.
 

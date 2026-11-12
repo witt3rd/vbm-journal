@@ -13,6 +13,10 @@ land_conf_keys="LAND_BASE LAND_REMOTE LAND_GATES_CMD LAND_TEST_CMD LAND_REGEN_CM
  LAND_CONVENTIONAL LAND_COMMIT_TYPES LAND_PROTECTED LAND_HOOKS_DIR LAND_LOCALE LAND_FAIL_PATTERN LAND_ATTEMPTS LAND_DEADLINE LAND_TIER1_TIMEOUT
  LAND_STEP_TIMEOUT LAND_GIT_TIMEOUT"
 
+# The keys of .land/lean.conf (docs/lean-gates.md): the same grammar and the same parser as land.conf, its own keys (one file per tool, as rustfmt.toml and clippy.toml are).
+lean_conf_keys="LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS"
+lean_conf_defaults() { LAND_LEAN_AXIOM_IMPORTS=; LAND_LEAN_AXIOM_ROOTS=; }   # the modules to import, and the module roots whose constants are audited (space separated)
+
 conf_defaults() {
   LAND_BASE=main; LAND_REMOTE=origin            # the branch landed on, and the remote that holds it
   LAND_GATES_CMD=; LAND_TEST_CMD=               # Tier 1 = the gates command, then the test command, on the rebased combination (at least one is required)
@@ -29,15 +33,15 @@ conf_defaults() {
   LAND_ATTEMPTS=30; LAND_DEADLINE=900           # a landing re-validates when the base moves under it: at most this many attempts, none started after this many seconds (then exit 16)
 }
 
-# conf_parse NAME: read the file's text from stdin; NAME is only used in messages. Returns 2 (with a message) on anything it does not understand.
+# conf_parse NAME [KEYS]: read the file's text from stdin; NAME is only used in messages; KEYS is the list of keys the file may set (default: land.conf's). Returns 2 (with a message) on anything it does not understand.
 conf_parse() {
-  local name=$1 line n=0 k v
+  local name=$1 keys=${2:-$land_conf_keys} line n=0 k v
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1)); line=${line%$'\r'}
     [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
     if ! [[ "$line" =~ ^[[:space:]]*(LAND_[A-Z0-9_]+)=(.*)$ ]]; then echo "$name:$n: not a LAND_KEY=value line: $line" >&2; return 2; fi
     k=${BASH_REMATCH[1]}; v=${BASH_REMATCH[2]}
-    case " $(echo $land_conf_keys) " in *" $k "*) ;; *) echo "$name:$n: unknown key $k (a typo would silently turn a gate off)" >&2; return 2;; esac
+    case " $(echo $keys) " in *" $k "*) ;; *) echo "$name:$n: unknown key $k (a typo would silently turn a gate off)" >&2; return 2;; esac
     v=${v%"${v##*[![:space:]]}"}
     if [[ "$v" =~ ^\"(.*)\"$ ]] || [[ "$v" =~ ^\'(.*)\'$ ]]; then v=${BASH_REMATCH[1]}; fi
     printf -v "$k" '%s' "$v"
@@ -57,4 +61,12 @@ conf_validate() {
   [[ "$LAND_REQUIRE_TRAILERS" =~ ^[A-Za-z0-9\ -]*$ ]] || b "LAND_REQUIRE_TRAILERS: trailer names are letters, digits and - separated by spaces"
   [ -n "$LAND_GATES_CMD$LAND_TEST_CMD" ] || b "neither LAND_GATES_CMD nor LAND_TEST_CMD is set: there is no Tier 1, so nothing could gate a landing"
   [ -z "$bad" ] || { echo "land.conf: $bad" >&2; return 2; }
+}
+
+# lean_conf_validate: the values of .land/lean.conf are module names, never anything that could be expanded or run. Returns 2 with a message otherwise.
+lean_conf_validate() {
+  local k
+  for k in LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS; do
+    [[ "${!k}" =~ ^[A-Za-z0-9_.]+( [A-Za-z0-9_.]+)*$ ]] || [ -z "${!k}" ] || { echo "lean.conf: $k holds module names only, separated by spaces (is '${!k}')" >&2; return 2; }
+  done
 }

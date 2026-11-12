@@ -1,5 +1,5 @@
 source=witt3rd/vbm-land
-version=v0.11.4
-commit=a7172fa5768bcc2d55f0ff7315f23be4a4a89c3f
-manifest_sha256=fe97fe51456c0eb3e0d55fe1086a841aa2c9c3e7ae90b0306a151ba37c576a3a
+version=v0.12.0
+commit=94de8237a8a0510e43111583e3356be2a23ffa70
+manifest_sha256=78ee7a94ae738346bceb4d4989c6c0cbaf41af4bfd7b2c0501636bd71c3d087a
 signature=verified
