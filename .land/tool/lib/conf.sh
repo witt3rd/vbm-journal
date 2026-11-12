@@ -14,8 +14,9 @@ land_conf_keys="LAND_BASE LAND_REMOTE LAND_GATES_CMD LAND_TEST_CMD LAND_REGEN_CM
  LAND_STEP_TIMEOUT LAND_GIT_TIMEOUT"
 
 # The keys of .land/lean.conf (docs/lean-gates.md): the same grammar and the same parser as land.conf, its own keys (one file per tool, as rustfmt.toml and clippy.toml are).
-lean_conf_keys="LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS LAND_LEAN_TRUST_FILES LAND_LEAN_TRUST_EXTERN_DIRS LAND_LEAN_TRUST_TOOLS LAND_LEAN_TRUST_KEYS_CMD"
+lean_conf_keys="LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS LAND_LEAN_RECHECK_MODULES LAND_LEAN_TRUST_FILES LAND_LEAN_TRUST_EXTERN_DIRS LAND_LEAN_TRUST_TOOLS LAND_LEAN_TRUST_KEYS_CMD"
 lean_conf_defaults() {
+  LAND_LEAN_RECHECK_MODULES=   # the modules whose proofs are replayed by the independent checker (space separated; each replays its whole import closure)
   LAND_LEAN_AXIOM_IMPORTS=; LAND_LEAN_AXIOM_ROOTS=   # the modules to import, and the module roots whose constants are audited (space separated)
   LAND_LEAN_TRUST_FILES=; LAND_LEAN_TRUST_EXTERN_DIRS=   # path patterns of the trusted files beyond the build pins (C, loaders, workflows), and the directories scanned for @[extern] (space separated)
   LAND_LEAN_TRUST_TOOLS="git gh mise lake leanc"   # the tools whose use by the scripts the ledger must name
@@ -71,7 +72,7 @@ conf_validate() {
 # lean_conf_validate: the values of .land/lean.conf are names and path patterns, never anything that could be expanded or run (the one command key, LAND_LEAN_TRUST_KEYS_CMD, is run later with `bash -c`, as land.conf's command keys are).
 lean_conf_validate() {
   local k
-  for k in LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS; do
+  for k in LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS LAND_LEAN_RECHECK_MODULES; do
     [[ "${!k}" =~ ^[A-Za-z0-9_.]+( [A-Za-z0-9_.]+)*$ ]] || [ -z "${!k}" ] || { echo "lean.conf: $k holds module names only, separated by spaces (is '${!k}')" >&2; return 2; }
   done
   for k in LAND_LEAN_TRUST_FILES LAND_LEAN_TRUST_EXTERN_DIRS; do
