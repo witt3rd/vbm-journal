@@ -6,4 +6,5 @@ lake build
 ! grep -rnw 'sorry' VbmJournal VbmJournalProofs --include='*.lean' || { echo "tier1: sorry found" >&2; exit 1; }
 .lake/build/bin/vbm-journal-test
 tests/crash.sh
-echo "ran: tier1: build, sorry check, differential test, crash test"
+.land/tool/bin/land-lean trust   # the trust ledger (docs/trust-ledger.md): what cannot be proven is marked as trusted, and what must be marked is derived from the tree (vbm-land docs/lean-gates.md)
+echo "ran: tier1: build, sorry check, differential test, crash test, trust ledger"
