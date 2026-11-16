@@ -302,7 +302,7 @@ while :; do
   if [ ${#inert_globs[@]} -gt 0 ] && [ -z "$prot_hit" ] && [ -s "$run/touched.txt" ]; then
     g diff --name-status --no-renames "$bsha" > "$run/touched.paths.txt"   # a rename is a deletion plus an addition here (touched.txt, which the hooks and the signers rule read, is unchanged): a file moved INTO an inert path is still seen leaving its old one
     # a path that is DELETED (or renamed away) is never inert: a check can read a file's existence (a ledger entry citing it), and nothing can tell that from its content; editing or adding an inert path is what the declaration covers
-    inert=1; while IFS=$'\t' read -r st f; do [[ "$st" != D* ]] && matches_any "$f" "${inert_globs[@]}" || { inert=0; break; }; done < "$run/touched.paths.txt"
+    inert=1; while IFS=$'\t' read -r pst f; do [[ "$pst" != D* ]] && matches_any "$f" "${inert_globs[@]}" || { inert=0; break; }; done < "$run/touched.paths.txt"
   fi
   if [ "$inert" = 1 ]; then
     validation=inert; vjson=',"validation":"inert"'; echo "land-direct: every changed path is inert (LAND_INERT): Tier 1 and the post-tier1 hook are not run"
