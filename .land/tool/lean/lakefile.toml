@@ -1,0 +1,8 @@
+# The landing tool's Lean modules as one small Lake PACKAGE (docs/lean-gates.md, `land-lean ledger`): a repository REQUIRES it
+# (`require «land-ledger» from ".land/tool/lean"`) instead of declaring a library of its own. Lake resolves a package by NAME, so a repository
+# and the libraries it vendors that all require it get ONE copy (the root's), where two libraries with the same module name would be ambiguous.
+name = "land-ledger"
+
+[[lean_lib]]
+name = "LandLedger"
+roots = ["LandLedger", "LandWalk"]

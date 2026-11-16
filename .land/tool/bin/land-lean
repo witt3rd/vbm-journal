@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# land-lean axiom [--selftest] | recheck [--selftest] | trust [--count]   (docs/lean-gates.md, docs/payload.md 4a)
+# land-lean axiom [--selftest] | recheck [--selftest] | ledger [--write|--selftest] | trust [--count]   (docs/lean-gates.md, docs/payload.md 4a)
 # The Lean gates this tool ships, for a repository that has .land/lean.conf (its presence is the opt-in). The file says WHICH modules to audit, in land.conf's grammar and read by the same parser (lib/conf.sh);
 # the tool owns HOW (lean/AxiomGate.lean). Run from the repository root, or set LAND_LEAN_ROOT.
 #   axiom   every constant of the audited roots depends only on the three standard axioms; --selftest also runs the differential test. Needs LAND_LEAN_AXIOM_IMPORTS and LAND_LEAN_AXIOM_ROOTS.
 #   recheck every proof of the modules in LAND_LEAN_RECHECK_MODULES, and of everything they import, replayed by Lean's own checker in a fresh process (leanchecker --fresh: the same kernel code, so it catches what bypassed the kernel, not a bug in it); --selftest first proves the checker rejects a planted false theorem. LEANCHECKER names another checker (a test seam).
+#   ledger  the obligation ledger (docs/proof-ledger.md): renders it from the repository's `def ledger : List Obligation` (lean/LandLedger.lean), checks every named theorem exists, and, as .land/lean.conf asks, which claims are about code that runs (reach), the ratchet, the clause tags and their coverage; --write rewrites the ratchet baseline.
 #   trust   the trust ledger (docs/trust-ledger.md): what cannot be proven is marked as trusted, and what must appear is DERIVED from the tree and the configuration; --count prints the number of entries.
 # Exit: 0 ok | 1 the gate failed | 2 usage or a refused configuration.
 set -euo pipefail
@@ -31,6 +32,19 @@ case $cmd in
     rc=0; for i in "${!mods[@]}"; do
       if wait "${pids[$i]}"; then echo "recheck: ${mods[$i]} ok"; else echo "recheck: ${mods[$i]} REJECTED"; sed 's/^/  /' "$logs/${mods[$i]}.log"; rc=1; fi; done
     [ "$rc" -ne 0 ] || echo "recheck: ok"; exit "$rc";;
+  ledger)
+    [ -n "$LAND_LEAN_LEDGER_MODULE" ] || { echo "land-lean: ledger needs LAND_LEAN_LEDGER_MODULE in $LAND_LEAN_CONF_FILE (the module holding the ledger)" >&2; exit 2; }
+    [ -n "$LAND_LEAN_LEDGER_SUBJECT" ] || [ -z "$LAND_LEAN_LEDGER_ENTRIES" ] || { echo "land-lean: LAND_LEAN_LEDGER_ENTRIES (reach) needs LAND_LEAN_LEDGER_SUBJECT (the module roots that count as the code)" >&2; exit 2; }
+    largs=(--module "$LAND_LEAN_LEDGER_MODULE" --constant "$LAND_LEAN_LEDGER_CONSTANT" --imports "${LAND_LEAN_LEDGER_IMPORTS// /,}" --subject "${LAND_LEAN_LEDGER_SUBJECT// /,}" --coverage "${LAND_LEAN_LEDGER_COVERAGE// /,}")
+    [ -z "$LAND_LEAN_LEDGER_ENTRIES" ] || largs+=(--entries "$LAND_LEAN_LEDGER_ENTRIES")
+    [ -z "$LAND_LEAN_LEDGER_BRIDGES" ] || largs+=(--bridges "$LAND_LEAN_LEDGER_BRIDGES")
+    [ -z "$LAND_LEAN_LEDGER_BASELINE" ] || largs+=(--baseline "$LAND_LEAN_LEDGER_BASELINE")
+    [ -z "$LAND_LEAN_LEDGER_CLAUSES" ] || largs+=(--clauses "$LAND_LEAN_LEDGER_CLAUSES")
+    [ "$LAND_LEAN_LEDGER_TAGGED" != 1 ] || largs+=(--tagged)
+    cd "$root"
+    # the gate imports the tool's two modules (the Lake package land-ledger, lean/lakefile.toml): build it (a cached no-op when current), so no repository's own build line has to name it
+    lb=$(lake build LandLedger 2>&1) || { printf '%s\n' "$lb" >&2; echo "land-lean: cannot build LandLedger: require the tool's package in the lakefile (docs/lean-gates.md, \`land-lean ledger\`)" >&2; exit 1; }
+    exec lake env lean --run "$here/../lean/LedgerGate.lean" "${largs[@]}" "$@";;
   trust)
     cd "$root"
     if [ "${1:-}" = --count ]; then grep -c '^### T[0-9]' docs/trust-ledger.md 2>/dev/null || echo 0; exit 0; fi
@@ -38,5 +52,5 @@ case $cmd in
     req=$(mktemp "${TMPDIR:-/tmp}/trust-keys.XXXXXX"); trap 'rm -f "$req"' EXIT
     bash "$here/../lean/trust-keys.sh" > "$req"
     exec python3 "$here/../lean/trust_ledger.py" docs/trust-ledger.md "$req";;
-  *) echo "usage: land-lean axiom [--selftest] | recheck [--selftest] | trust [--count]" >&2; exit 2;;
+  *) echo "usage: land-lean axiom [--selftest] | recheck [--selftest] | ledger [--write|--selftest] | trust [--count]" >&2; exit 2;;
 esac

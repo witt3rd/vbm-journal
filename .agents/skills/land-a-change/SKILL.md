@@ -11,7 +11,7 @@ There is exactly one way: `.land/land-direct` (a stub for the vendored `.land/to
 ## Steps
 
 1. Work in a worktree off fresh `origin/main`; commit with Conventional Commits (`type(scope): summary`). Keep the diff within the size budget (default 150 production lines; over it, split, or add a `Diff-Budget: <decomposition note>` trailer only with a real plan).
-2. Cheap pre-check (commit messages, size budget, no push): `.land/land-direct --check`. Full rehearsal without the push: `.land/land-direct --dry-run`.
+2. Cheap pre-check (commit messages, size budget, no push): `.land/land-direct --check`. Full rehearsal without the push: `.land/land-direct --validate` (it pins the validated commit; `.land/land-direct --push SHA` then pushes exactly it, no check run again).
 3. Land: `.land/land-direct`. Bound it: `timeout 1900 .land/land-direct`.
 4. Read the **last line of stdout**, JSON: `{"sha","commits","tier1_seconds","result","exit"}`. Use `jq`: `... | tail -n1 | jq -r .result`.
 5. Act on the exit code:
@@ -37,7 +37,7 @@ A landing that touches a pattern of `LAND_PROTECTED` is allowed: the lander name
 
 ## What red means
 
-Nothing runs after the push: Tier 1 on the rebased combination is the only gate. If main is ever red, whoever sees it reverts the commit that made it red with `git revert` and lands the revert; its author reproduces in a new worktree and resubmits (`triage-red`). Your landing must not ADD a failure.
+Nothing runs after the push: Tier 1 on the rebased combination is the gate for landing (fast and best-effort; the full suite runs on the release candidate before a release, `land-release --rc`). If main is ever red, whoever sees it reverts the commit that made it red with `git revert` and lands the revert; its author reproduces in a new worktree and resubmits (`triage-red`). Your landing must not ADD a failure.
 
 ## Do NOT
 

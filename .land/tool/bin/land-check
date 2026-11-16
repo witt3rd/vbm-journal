@@ -36,7 +36,7 @@ check_one() {   # the pin, the manifest, every listed file (hash, executable bit
   done < "$man"
   while IFS= read -r f; do f=${f#"$root"/}; case $f in "$LAND_MANIFEST_FILE") continue;; esac   # the manifest is the only file under $pdir that lists itself
     [ -n "${listed[$f]:-}" ] || drift "$f is not part of the pinned release (an extra or local file inside the vendored tree)"
-  done < <(find "$root/$pdir" -type f | LC_ALL=C sort)
+  done < <(find "$root/$pdir" -type f -not -path '*/.lake/*' | LC_ALL=C sort)   # a Lake build product (the tool's package builds in place) is not part of a release
   # the repository's own files: well formed. $LAND_ENTRY is the repository's own entry script (install creates it from templates/land-direct-stub when absent; add what you need before the exec):
   # it must be executable and still run the pinned lander, named either from the repository root ($LAND_DIR/bin/land-direct) or, as the stub does, beside itself (tool/bin/land-direct).
   e=$(grep -v '^[[:space:]]*#' "$root/$LAND_ENTRY" 2>/dev/null || true)

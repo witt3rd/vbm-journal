@@ -6,7 +6,7 @@ description: >-
 
 # triage-red
 
-Nothing runs after the push, so a red main is found by whoever runs Tier 1 on it next (a lander's run, a worker, you). Red does **not** stop landing (a landing must not ADD a failure; one main already has is "inherited red").
+Nothing runs after the push, so a red main is found by whoever runs Tier 1 on it next (a lander's run, a worker, you). Red does **not** stop landing (a landing must not ADD a failure; one main already has is "inherited red"), but the release candidate cannot be green until it is fixed.
 
 ## If you find main red
 

@@ -21,7 +21,7 @@ Precondition (all three): only your agents or you write to it; main is not deplo
 
 ## Verify
 
-`.land/tool/bin/land-check` ok; `.land/land-direct --dry-run` ends `would-land`; after step 6 the landing exits 0.
+`.land/tool/bin/land-check` ok; `.land/land-direct --validate` ends `validated`; after step 6 the landing exits 0.
 
 ## Do NOT
 
