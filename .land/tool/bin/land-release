@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# land-release [--rc] [--push]   (any repository, maintainer only; docs/pin.md section 2)
+# land-release [--declare] [--rc] [--push]   (any repository, maintainer only; docs/pin.md section 2)
 # Makes the release: the annotated, SIGNED tag v<VERSION> on HEAD. Its message records tree_sha256= (the tree hash of the exported HEAD, so the signature binds every file: land-pin vendor checks it),
 # and, for a repository that ships a MANIFEST.sha256 (this tool's source), manifest_sha256= too (land-update, install). Consumers verify the signature against their own .land/land.signers first.
 #   Requires: a clean tree, HEAD == origin/main (the release is what main is), a fresh MANIFEST.sha256 where the repository has one, the tag not yet existing, and a signing key:
@@ -7,30 +7,54 @@
 #   --push also pushes the tag (never a branch).
 #   The release candidate: when the repository's land.conf (read from origin/main) sets LAND_RC_CMD, that command runs on the exact HEAD, with LAND_RC=1 in its environment, BEFORE any tag is made;
 #   it must exit 0 or there is no tag. The command is the project's FULL suite: LAND_RC=1 tells it that nothing may be cached, selected or skipped (including LAND_INERT, which belongs to landing).
+#   --declare cuts the candidate: the branch rc/v<VERSION> at origin/main's head, pushed. Main keeps landing at full speed; the full suite runs on the branch (--rc) and a red result is fixed with the
+#   ordinary lander on the branch (LAND_BASE=rc/v<VERSION>) AND on main (the same fix, git cherry-pick -x), until green. A release made from the branch is refused while the branch holds a change that
+#   is not on main (git cherry, which compares what a commit changes, not its hash). A release from main itself, with no branch, is still allowed.
 #   --rc runs only that suite: no tag, no signing key, no VERSION or manifest check (HEAD must still be origin/main: the candidate is what main is). No LAND_RC_CMD: the release proceeds and says so on stderr.
 set -euo pipefail
 export LC_ALL=C
 here=$(cd "$(dirname "$0")" && pwd); . "$here/../lib/verify.sh"
 root=$(git -C "$here" rev-parse --show-toplevel); cd "$root"
-push=0; rc_only=0
-for a in "$@"; do case $a in --push) push=1;; --rc) rc_only=1;; *) echo "usage: land-release [--rc] [--push]" >&2; exit 2;; esac; done
-if [ "$rc_only" = 0 ]; then
-  key=${LAND_SIGNING_KEY:?set LAND_SIGNING_KEY to the ssh key that signs releases}
-  [ -r "$key" ] || { echo "land-release: cannot read $key" >&2; exit 2; }
-  ver=$(cat VERSION); [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "land-release: VERSION ($ver) is not a plain X.Y.Z" >&2; exit 2; }
+push=0; rc_only=0; declare=0
+for a in "$@"; do case $a in --push) push=1;; --rc) rc_only=1;; --declare) declare=1;; *) echo "usage: land-release [--declare] [--rc] [--push]" >&2; exit 2;; esac; done
+ver=$(cat VERSION 2>/dev/null || true)
+if [ "$rc_only" = 0 ] || [ "$declare" = 1 ]; then
+  [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "land-release: VERSION ($ver) is not a plain X.Y.Z" >&2; exit 2; }
   tag=v$ver
 fi
+if [ "$rc_only" = 0 ] && [ "$declare" = 0 ]; then
+  key=${LAND_SIGNING_KEY:?set LAND_SIGNING_KEY to the ssh key that signs releases}
+  [ -r "$key" ] || { echo "land-release: cannot read $key" >&2; exit 2; }
+fi
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "land-release: the tree is not clean" >&2; exit 1; }
-git fetch -q origin; [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "land-release: HEAD is not origin/main: a release is what main is" >&2; exit 1; }
-# ---- the release candidate: the project's full suite on the exact HEAD, before anything is signed. The config is read from origin/main (data, never expanded), like the lander reads it.
-rcconf=$(git show "origin/main:${LAND_CONF_FILE:-.land/land.conf}" 2>/dev/null || true)
+git fetch -q origin
+cand=""; [ -z "$ver" ] || cand=rc/v$ver
+has_cand() { [ -n "$cand" ] && git rev-parse -q --verify "refs/remotes/origin/$cand" >/dev/null; }
+if [ "$declare" = 1 ]; then
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "land-release: HEAD is not origin/main: a candidate is cut from what main is" >&2; exit 1; }
+  ! has_cand || { echo "land-release: $cand is already declared" >&2; exit 1; }
+  git push -q origin "HEAD:refs/heads/$cand"
+  echo "land-release: declared the candidate $cand at $(git rev-parse --short HEAD). Main keeps landing. Run the full suite on the branch (land-release --rc); fix a red result with LAND_BASE=$cand on the branch and the same fix on main (git cherry-pick -x); release from the branch (land-release --push) when green."
+  exit 0
+fi
+base=main
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+  if has_cand && [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$cand")" ]; then base=$cand
+  else echo "land-release: HEAD is neither origin/main nor the declared candidate origin/${cand:-rc/v<VERSION>} (land-release --declare cuts one)" >&2; exit 1; fi
+fi
+if [ "$base" != main ]; then
+  unported=$(git cherry origin/main HEAD | sed -n 's/^+ //p' | cut -c1-8 | tr '\n' ' ')
+  [ -z "$unported" ] || { echo "land-release: the candidate $base holds changes that are not on main (git cherry): $unported: land the same fixes on main first" >&2; exit 1; }
+fi
+# ---- the release candidate: the project's full suite on the exact HEAD, before anything is signed. The config is read from the branch being released (origin/main or the candidate; data, never expanded), like the lander reads it.
+rcconf=$(git show "origin/$base:${LAND_CONF_FILE:-.land/land.conf}" 2>/dev/null || true)
 rc_cmd=$(printf '%s\n' "$rcconf" | sed -n 's/^[[:space:]]*LAND_RC_CMD=//p' | tail -n 1)
 rc_to=$(printf '%s\n' "$rcconf" | sed -n 's/^[[:space:]]*LAND_RC_TIMEOUT=//p' | tail -n 1); rc_to=${rc_to:-7200}
 [[ "$rc_to" =~ ^[0-9]+$ ]] || { echo "land-release: LAND_RC_TIMEOUT ($rc_to) is not a whole number of seconds" >&2; exit 2; }
 if [ -n "$rc_cmd" ]; then
   echo "land-release: release candidate $(git rev-parse --short HEAD): running LAND_RC_CMD (LAND_RC=1: nothing may be cached, selected or skipped)"
   rc=0; LAND_RC=1 timeout --foreground "$rc_to" bash -c "$rc_cmd" || rc=$?
-  [ "$rc" = 0 ] || { echo "land-release: the release candidate is RED (exit $rc): no tag. Fix it on main and run this again." >&2; exit 1; }
+  [ "$rc" = 0 ] || { echo "land-release: the release candidate is RED (exit $rc): no tag. Fix it on $base$([ "$base" = main ] || echo " and on main") and run this again." >&2; exit 1; }
   echo "land-release: the release candidate is green"
 else
   echo "land-release: no LAND_RC_CMD in ${LAND_CONF_FILE:-.land/land.conf}: this release candidate is NOT verified by a full suite" >&2

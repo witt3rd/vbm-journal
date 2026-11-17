@@ -11,7 +11,7 @@
 
 land_conf_keys="LAND_BASE LAND_REMOTE LAND_GATES_CMD LAND_TEST_CMD LAND_REGEN_CMD LAND_GEN_CMD LAND_GENERATED_LIST LAND_REQUIRE_TRAILERS
  LAND_CONVENTIONAL LAND_COMMIT_TYPES LAND_PROTECTED LAND_INERT LAND_HOOKS_DIR LAND_LOCALE LAND_ATTEMPTS LAND_DEADLINE LAND_TIER1_TIMEOUT
- LAND_STEP_TIMEOUT LAND_GIT_TIMEOUT LAND_RC_CMD LAND_RC_TIMEOUT"
+ LAND_STEP_TIMEOUT LAND_GIT_TIMEOUT LAND_RC_CMD LAND_RC_TIMEOUT LAND_REUSE LAND_AFFECTS_CMD"
 
 # The keys of .land/lean.conf (docs/lean-gates.md): the same grammar and the same parser as land.conf, its own keys (one file per tool, as rustfmt.toml and clippy.toml are).
 lean_conf_keys="LAND_LEAN_AXIOM_IMPORTS LAND_LEAN_AXIOM_ROOTS LAND_LEAN_RECHECK_MODULES LAND_LEAN_LEDGER_MODULE LAND_LEAN_LEDGER_CONSTANT LAND_LEAN_LEDGER_IMPORTS LAND_LEAN_LEDGER_SUBJECT LAND_LEAN_LEDGER_ENTRIES LAND_LEAN_LEDGER_BRIDGES LAND_LEAN_LEDGER_BASELINE LAND_LEAN_LEDGER_CLAUSES LAND_LEAN_LEDGER_TAGGED LAND_LEAN_LEDGER_COVERAGE LAND_LEAN_TRUST_FILES LAND_LEAN_TRUST_EXTERN_DIRS LAND_LEAN_TRUST_TOOLS LAND_LEAN_TRUST_KEYS_CMD"
@@ -39,6 +39,7 @@ conf_defaults() {
   LAND_LOCALE=C                                 # pinned for collation, glob and sort order
   LAND_TIER1_TIMEOUT=1800; LAND_STEP_TIMEOUT=600; LAND_GIT_TIMEOUT=180   # seconds
   LAND_RC_CMD=; LAND_RC_TIMEOUT=7200            # the release candidate's full suite, run by land-release on the exact HEAD before any tag (README, "The release candidate"); seconds
+  LAND_REUSE=0; LAND_AFFECTS_CMD=               # 1: when the base moved since this landing's last passing validation, a move that touches no path this change touches or depends on is not validated again (README, "Reuse"); the command maps paths (stdin) to the paths they affect (stdout), identity when empty
   LAND_ATTEMPTS=30; LAND_DEADLINE=900           # a landing re-validates when the base moves under it: at most this many attempts, none started after this many seconds (then exit 16)
 }
 
@@ -66,6 +67,7 @@ conf_validate() {
   for k in LAND_ATTEMPTS LAND_DEADLINE LAND_TIER1_TIMEOUT LAND_STEP_TIMEOUT LAND_GIT_TIMEOUT LAND_RC_TIMEOUT; do
     [[ "${!k}" =~ ^[0-9]+$ ]] || b "$k must be a whole number (is '${!k}')"
   done
+  [[ "$LAND_REUSE" =~ ^[01]$ ]] || b "LAND_REUSE must be 0 or 1 (is '$LAND_REUSE')"
   [ "$LAND_ATTEMPTS" -ge 1 ] 2>/dev/null || b "LAND_ATTEMPTS must be at least 1 (is '$LAND_ATTEMPTS')"
   [[ "$LAND_REQUIRE_TRAILERS" =~ ^[A-Za-z0-9\ -]*$ ]] || b "LAND_REQUIRE_TRAILERS: trailer names are letters, digits and - separated by spaces"
   [ -n "$LAND_GATES_CMD$LAND_TEST_CMD" ] || b "neither LAND_GATES_CMD nor LAND_TEST_CMD is set: there is no Tier 1, so nothing could gate a landing"

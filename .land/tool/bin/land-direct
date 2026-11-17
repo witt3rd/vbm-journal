@@ -56,7 +56,7 @@ rev=${args[0]:-HEAD}
 if [ "$pushmode" = 1 ]; then [ ${#args[@]} = 0 ] && [ "$dry$checkonly$group" = 000 ] || usage; [[ "$pushrev" =~ ^[0-9a-f]{40}$ ]] || { echo "land-direct: --push takes the full 40-hex sha that --validate returned" >&2; exit 2; }; fi
 
 hooks=; wt=; sha=; ncommits=; t1=; result=error; t0=$(date +%s); common=; state=; run=; extra_json=; tip0=; attempt=0; already=0; inherited=0; stage=; newfail=; hookcwd=
-validation=tier1; vjson=   # what judged this landing: tier1, or inert (every changed path is declared inert in LAND_INERT: nothing reads it); vjson is the summary key, present ONLY for inert so the usual line keeps its shape; set early, every exit prints the summary
+validation=tier1; vjson=   # what judged this landing: tier1, or inert (every changed path is declared inert in LAND_INERT: nothing reads it); vjson is the summary key, present ONLY for inert and reused (LAND_REUSE: the base moved since the last passing validation, in nothing this change touches or depends on) so the usual line keeps its shape; set early, every exit prints the summary
 reason=; step=start; lastlines=; logfile=; cfiles=; bsha=
 jesc() { awk 'BEGIN{ORS=""} {gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/,"\\t"); gsub(/\r/,""); if (NR>1) print "\\n"; print}'; }
 json_num() { [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]] && printf '%s' "$1" || printf null; }
@@ -256,6 +256,23 @@ run_hook prepare || stop 12 refused "the prepare hook failed"
 # more: another attempt only within LAND_ATTEMPTS attempts and LAND_DEADLINE seconds of the start; past either, exit 16 (nobody holds anything: the base moved faster than this run could validate)
 deadline=$((t0 + LAND_DEADLINE)); prev=
 more() { [ "$attempt" -lt "$LAND_ATTEMPTS" ] && [ "$(date +%s)" -lt "$deadline" ] || stop 16 moved "$base moved faster than I could validate: $attempt attempt(s) in $(( $(date +%s) - t0 ))s (at most $LAND_ATTEMPTS, within ${LAND_DEADLINE}s); nothing landed; run land-direct again."; }
+# reuse (LAND_REUSE=1): this landing's last attempt PASSED Tier 1 on base $prev; the base then moved to $bsha. When no path that moved is a path this change touches, and none affects (LAND_AFFECTS_CMD:
+# paths on stdin, the paths they can affect on stdout; identity when unset) one the other touches, the earlier verdict still describes this combination and Tier 1 is not run again. Anything unsure is a
+# run: the tool, hooks and settings moving ($LAND_HOME/, the hooks directory, the conf file), a provider that fails, a regenerated file, a protected path touched, a base that is not a descendant. Best effort by design: what the rule lets
+# through that Tier 1 would have caught is an escape, found by the release candidate (README 4.8), which is also what audits LAND_AFFECTS_CMD.
+affects() { if [ -n "$LAND_AFFECTS_CMD" ]; then (cd "$wt" && bounded "$st" "LAND_AFFECTS_CMD" bash -c "$LAND_AFFECTS_CMD"); else cat; fi; }
+reuse_ok() {
+  g merge-base --is-ancestor "$prev" "$bsha" || return 1
+  g diff --name-only --no-renames "$prev" "$bsha" > "$run/moved.txt" || return 1
+  g diff --name-only --no-renames "$bsha" > "$run/mine.txt" || return 1
+  [ -s "$run/mine.txt" ] || return 1
+  ! grep -q -e "^$LAND_HOME/" -e "^${LAND_HOOKS_DIR%/}/" -e "^${LAND_CONF_FILE}\$" "$run/moved.txt" || return 1   # the tool, the settings, the hooks and the signers: what judges a change moved
+  affects < "$run/moved.txt" > "$run/moved.aff" || return 1
+  affects < "$run/mine.txt" > "$run/mine.aff" || return 1
+  ! grep -qx -e "[*]" "$run/moved.aff" "$run/mine.aff" || return 1   # a provider that prints * says the path affects everything: a run
+  local hit; hit=$({ LC_ALL=C comm -12 <(sort -u "$run/mine.txt") <(sort -u "$run/moved.txt" "$run/moved.aff"); LC_ALL=C comm -12 <(sort -u "$run/moved.txt") <(sort -u "$run/mine.txt" "$run/mine.aff"); }) || return 1
+  [ -z "$hit" ]
+}
 while :; do
   attempt=$((attempt + 1))
   fetch_base "$gt" "$wt" || die "cannot fetch $remote $base (timed out or failed)"
@@ -304,8 +321,12 @@ while :; do
     # a path that is DELETED (or renamed away) is never inert: a check can read a file's existence (a ledger entry citing it), and nothing can tell that from its content; editing or adding an inert path is what the declaration covers
     inert=1; while IFS=$'\t' read -r pst f; do [[ "$pst" != D* ]] && matches_any "$f" "${inert_globs[@]}" || { inert=0; break; }; done < "$run/touched.paths.txt"
   fi
+  reuse=0
+  if [ "$LAND_REUSE" = 1 ] && [ "$inert" = 0 ] && [ -n "$prev" ] && [ "$prev" != "$bsha" ] && [ -z "$prot_hit" ] && [ "$regenned" = 0 ] && reuse_ok; then reuse=1; fi
   if [ "$inert" = 1 ]; then
     validation=inert; vjson=',"validation":"inert"'; echo "land-direct: every changed path is inert (LAND_INERT): Tier 1 and the post-tier1 hook are not run"
+  elif [ "$reuse" = 1 ]; then
+    validation=reused; vjson=',"validation":"reused"'; echo "land-direct: reused: $(wc -l < "$run/moved.txt") path(s) moved since ${prev:0:12}, none that this change touches or depends on: Tier 1 passed on that base and is not run again"
   else validation=tier1; vjson=
   for stage in gates tests; do
     step=tier1-$stage; t1stage "$stage" "$wt" "$run/tier1.$stage.log" "$run/failed.$stage" || {
@@ -315,7 +336,7 @@ while :; do
   t1=$(( $(date +%s) - ts )); prev=$bsha
   step=post-tier1-hook; run_hook post-tier1 || stop 12 refused "the post-tier1 hook refused this change (a gate that judges the tree after Tier 1, such as an attack suite; see above)"
   fi
-  [ "$inert" = 0 ] || { t1=0; prev=$bsha; }
+  [ "$inert$reuse" = 00 ] || { t1=0; prev=$bsha; }
   # Tier 1 may render generated files: dirty only in generated paths = they were stale: commit them as a commit of the lander (carrying the tip's trailers)
   dirty=$(g status --porcelain | sed 's/^...//'); strays=$(grep -vxFf <(printf '%s\n' "$gen") <<<"$dirty" || true)
   [ -z "$strays" ] || stop 13 tier1 "Tier 1 left changes outside the generated paths: $(echo $strays); not landing."
