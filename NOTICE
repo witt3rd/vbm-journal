@@ -1,0 +1,15 @@
+vbm-journal
+Copyright 2026 the vbm-journal authors.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party material used by this repository:
+
+* vbm-land (https://github.com/witt3rd/vbm-land), Apache License 2.0,
+  the landing tool, vendored unchanged at a pinned release in .land/tool/
+  (.land/PIN).
+
+* Lean 4 (https://github.com/leanprover/lean4), Apache License 2.0,
+  Copyright (c) Microsoft Corporation, Lean FRO LLC and the Lean contributors.
+  The Lean toolchain is not part of this repository: it is downloaded at
+  build time (mise.toml).
